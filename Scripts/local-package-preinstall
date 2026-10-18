@@ -1,0 +1,156 @@
+#!/bin/sh
+set -eu
+
+HELPER_PATH="/Library/PrivilegedHelperTools/com.perky.app.lid-helper"
+LAUNCH_DAEMON_PATH="/Library/LaunchDaemons/com.perky.app.lid-helper.plist"
+STATE_DIRECTORY="/Library/Application Support/Perky"
+ROLLBACK_DIRECTORY="$STATE_DIRECTORY/upgrade-rollback"
+SESSION_LOCK_PATH="$STATE_DIRECTORY/session.lock"
+INSTALL_PENDING_PATH="$STATE_DIRECTORY/install.pending"
+UNINSTALL_PENDING_PATH="$STATE_DIRECTORY/uninstall.pending"
+INSTALL_TEMP=""
+ROLLBACK_TEMP=""
+
+cleanup_temporaries() {
+	if [ -n "$INSTALL_TEMP" ]; then /bin/rm -f "$INSTALL_TEMP"; fi
+	if [ -n "$ROLLBACK_TEMP" ]; then /bin/rm -rf "$ROLLBACK_TEMP"; fi
+}
+trap cleanup_temporaries EXIT
+trap 'exit 1' HUP INT TERM
+
+if [ "$(/usr/bin/id -u)" -ne 0 ]; then
+	printf '%s\n' "Perky's local package installer must run as root." >&2
+	exit 1
+fi
+if [ -L "$STATE_DIRECTORY" ] || { [ -e "$STATE_DIRECTORY" ] && [ ! -d "$STATE_DIRECTORY" ]; }; then
+	printf '%s\n' "Perky's protected state directory is not a regular directory. No files were replaced." >&2
+	exit 1
+fi
+/usr/bin/install -d -o root -g wheel -m 700 "$STATE_DIRECTORY"
+if [ "$(/usr/bin/stat -f '%u' "$STATE_DIRECTORY")" -ne 0 ] \
+	|| [ "$(/usr/bin/stat -f '%Lp' "$STATE_DIRECTORY")" != "700" ]; then
+	printf '%s\n' "Perky's protected state directory has unexpected ownership or permissions." >&2
+	exit 1
+fi
+if [ -L "$SESSION_LOCK_PATH" ] || { [ -e "$SESSION_LOCK_PATH" ] && [ ! -f "$SESSION_LOCK_PATH" ]; }; then
+	printf '%s\n' "Perky's session lock is not a regular file." >&2
+	exit 1
+fi
+if [ ! -e "$SESSION_LOCK_PATH" ]; then
+	/usr/bin/install -o root -g wheel -m 600 /dev/null "$SESSION_LOCK_PATH"
+fi
+if [ "$(/usr/bin/stat -f '%u' "$SESSION_LOCK_PATH")" -ne 0 ] \
+	|| [ "$(/usr/bin/stat -f '%Lp' "$SESSION_LOCK_PATH")" != "600" ]; then
+	printf '%s\n' "Perky's session lock has unexpected ownership or permissions." >&2
+	exit 1
+fi
+if [ "${PERKY_INSTALL_LOCKED:-}" != "1" ]; then
+	exec /usr/bin/lockf -k "$SESSION_LOCK_PATH" /usr/bin/env PERKY_INSTALL_LOCKED=1 /bin/sh "$0" "$@"
+fi
+
+if [ ! -d "$STATE_DIRECTORY" ] || [ -L "$STATE_DIRECTORY" ]; then
+	printf '%s\n' "Perky's state directory changed while waiting for its install lock. No files were replaced." >&2
+	exit 1
+fi
+
+if [ -e "$UNINSTALL_PENDING_PATH" ] || [ -L "$UNINSTALL_PENDING_PATH" ]; then
+	if [ ! -f "$UNINSTALL_PENDING_PATH" ] || [ -L "$UNINSTALL_PENDING_PATH" ] \
+		|| [ "$(/usr/bin/stat -f '%u' "$UNINSTALL_PENDING_PATH")" -ne 0 ] \
+		|| [ "$(/usr/bin/stat -f '%Lp' "$UNINSTALL_PENDING_PATH")" != "600" ]; then
+		printf '%s\n' "Perky's uninstall marker has unexpected ownership or permissions." >&2
+		exit 1
+	fi
+fi
+
+if [ -e "$INSTALL_PENDING_PATH" ] || [ -L "$INSTALL_PENDING_PATH" ]; then
+	if [ ! -f "$INSTALL_PENDING_PATH" ] || [ -L "$INSTALL_PENDING_PATH" ] \
+		|| [ "$(/usr/bin/stat -f '%u' "$INSTALL_PENDING_PATH")" -ne 0 ] \
+		|| [ "$(/usr/bin/stat -f '%Lp' "$INSTALL_PENDING_PATH")" != "600" ]; then
+		printf '%s\n' "Perky's install marker has unexpected ownership or permissions." >&2
+		exit 1
+	fi
+else
+	INSTALL_TEMP=$(/usr/bin/mktemp "$STATE_DIRECTORY/.install.pending.XXXXXX")
+	/usr/sbin/chown root:wheel "$INSTALL_TEMP"
+	/bin/chmod 600 "$INSTALL_TEMP"
+	/bin/mv -f "$INSTALL_TEMP" "$INSTALL_PENDING_PATH"
+	INSTALL_TEMP=""
+fi
+
+validate_rollback_directory() {
+	[ -d "$ROLLBACK_DIRECTORY" ] && [ ! -L "$ROLLBACK_DIRECTORY" ] || return 1
+	[ "$(/usr/bin/stat -f '%u' "$ROLLBACK_DIRECTORY")" -eq 0 ] || return 1
+	[ "$(/usr/bin/stat -f '%Lp' "$ROLLBACK_DIRECTORY")" = "700" ] || return 1
+	[ -x "$ROLLBACK_DIRECTORY/com.perky.app.lid-helper" ] || return 1
+	[ -f "$ROLLBACK_DIRECTORY/com.perky.app.lid-helper.plist" ] || return 1
+	/usr/bin/codesign --verify --strict "$ROLLBACK_DIRECTORY/com.perky.app.lid-helper" >/dev/null 2>&1 || return 1
+	/usr/bin/codesign -dv --verbose=4 "$ROLLBACK_DIRECTORY/com.perky.app.lid-helper" 2>&1 \
+		| /usr/bin/grep -Fq 'Identifier=com.perky.app.lid-helper' || return 1
+	/usr/bin/plutil -lint "$ROLLBACK_DIRECTORY/com.perky.app.lid-helper.plist" >/dev/null || return 1
+	[ "$(/usr/libexec/PlistBuddy -c 'Print :Label' "$ROLLBACK_DIRECTORY/com.perky.app.lid-helper.plist")" = "com.perky.app.lid-helper" ] || return 1
+	return 0
+}
+
+if [ -e "$ROLLBACK_DIRECTORY" ] || [ -L "$ROLLBACK_DIRECTORY" ]; then
+	if ! validate_rollback_directory; then
+		printf 'Perky found an incomplete or unsafe upgrade rollback snapshot at %s. No files were replaced.\n' \
+			"$ROLLBACK_DIRECTORY" >&2
+		exit 1
+	fi
+	# An earlier installation did not finish. Keep its last known-good snapshot
+	# so postinstall can restore it if this upgrade also fails.
+	exit 0
+fi
+
+HELPER_EXISTS=0
+PLIST_EXISTS=0
+if [ -e "$HELPER_PATH" ] || [ -L "$HELPER_PATH" ]; then HELPER_EXISTS=1; fi
+if [ -e "$LAUNCH_DAEMON_PATH" ] || [ -L "$LAUNCH_DAEMON_PATH" ]; then PLIST_EXISTS=1; fi
+
+if [ "$HELPER_EXISTS" -eq 0 ] && [ "$PLIST_EXISTS" -eq 0 ]; then
+	# First install: there is no earlier Perky daemon to preserve.
+	exit 0
+fi
+
+if [ "$HELPER_EXISTS" -ne 1 ] || [ "$PLIST_EXISTS" -ne 1 ] \
+	|| [ ! -f "$HELPER_PATH" ] || [ -L "$HELPER_PATH" ] || [ ! -x "$HELPER_PATH" ] \
+	|| [ ! -f "$LAUNCH_DAEMON_PATH" ] || [ -L "$LAUNCH_DAEMON_PATH" ]; then
+	printf '%s\n' "Perky found a partial or unsafe existing helper installation. No files were replaced." >&2
+	exit 1
+fi
+
+if [ "$(/usr/bin/stat -f '%u' "$HELPER_PATH")" -ne 0 ] \
+	|| [ "$(/usr/bin/stat -f '%u' "$LAUNCH_DAEMON_PATH")" -ne 0 ]; then
+	printf '%s\n' "Perky found an existing helper not owned by root. No files were replaced." >&2
+	exit 1
+fi
+
+/usr/bin/codesign --verify --strict "$HELPER_PATH" >/dev/null 2>&1 || {
+	printf '%s\n' "Perky could not verify the existing helper before upgrade. No files were replaced." >&2
+	exit 1
+}
+if ! /usr/bin/codesign -dv --verbose=4 "$HELPER_PATH" 2>&1 \
+	| /usr/bin/grep -Fq 'Identifier=com.perky.app.lid-helper'; then
+	printf '%s\n' "The existing privileged helper does not identify as Perky. No files were replaced." >&2
+	exit 1
+fi
+/usr/bin/plutil -lint "$LAUNCH_DAEMON_PATH" >/dev/null
+if [ "$(/usr/libexec/PlistBuddy -c 'Print :Label' "$LAUNCH_DAEMON_PATH")" != "com.perky.app.lid-helper" ]; then
+	printf '%s\n' "The existing LaunchDaemon is not Perky's helper. No files were replaced." >&2
+	exit 1
+fi
+
+/usr/bin/install -d -o root -g wheel -m 700 "$STATE_DIRECTORY"
+ROLLBACK_TEMP=$(/usr/bin/mktemp -d "$STATE_DIRECTORY/.upgrade-rollback.XXXXXX")
+/usr/bin/ditto --norsrc "$HELPER_PATH" "$ROLLBACK_TEMP/com.perky.app.lid-helper"
+/usr/bin/ditto --norsrc "$LAUNCH_DAEMON_PATH" "$ROLLBACK_TEMP/com.perky.app.lid-helper.plist"
+/usr/sbin/chown -R root:wheel "$ROLLBACK_TEMP"
+/bin/chmod 700 "$ROLLBACK_TEMP"
+/bin/chmod 755 "$ROLLBACK_TEMP/com.perky.app.lid-helper"
+/bin/chmod 644 "$ROLLBACK_TEMP/com.perky.app.lid-helper.plist"
+/bin/chmod -N "$ROLLBACK_TEMP" "$ROLLBACK_TEMP/com.perky.app.lid-helper" \
+	"$ROLLBACK_TEMP/com.perky.app.lid-helper.plist"
+/usr/bin/codesign --verify --strict "$ROLLBACK_TEMP/com.perky.app.lid-helper" >/dev/null 2>&1
+/usr/bin/plutil -lint "$ROLLBACK_TEMP/com.perky.app.lid-helper.plist" >/dev/null
+/bin/mv "$ROLLBACK_TEMP" "$ROLLBACK_DIRECTORY"
+ROLLBACK_TEMP=""

@@ -5,8 +5,112 @@ APP_PATH="/Applications/Perky.app"
 HELPER_PATH="/Library/PrivilegedHelperTools/com.perky.app.lid-helper"
 LAUNCH_DAEMON_PATH="/Library/LaunchDaemons/com.perky.app.lid-helper.plist"
 SERVICE_LABEL="com.perky.app.lid-helper"
+HELPER_PROCESS_PATTERN='^/Library/PrivilegedHelperTools/com\.perky\.app\.lid-helper --perky-local-admin-install$'
 STATE_DIRECTORY="/Library/Application Support/Perky"
 STATE_PATH="$STATE_DIRECTORY/local-install.plist"
+ROLLBACK_DIRECTORY="$STATE_DIRECTORY/upgrade-rollback"
+SESSION_LOCK_PATH="$STATE_DIRECTORY/session.lock"
+INSTALL_PENDING_PATH="$STATE_DIRECTORY/install.pending"
+UNINSTALL_PENDING_PATH="$STATE_DIRECTORY/uninstall.pending"
+
+if [ "$(/usr/bin/id -u)" -ne 0 ]; then
+	printf '%s\n' "Perky's local package installer must run as root." >&2
+	exit 1
+fi
+if [ -L "$STATE_DIRECTORY" ] || [ ! -d "$STATE_DIRECTORY" ] \
+	|| [ "$(/usr/bin/stat -f '%u' "$STATE_DIRECTORY")" -ne 0 ] \
+	|| [ "$(/usr/bin/stat -f '%Lp' "$STATE_DIRECTORY")" != "700" ]; then
+	printf '%s\n' "Perky's protected state directory is missing or unsafe." >&2
+	exit 1
+fi
+if [ -L "$SESSION_LOCK_PATH" ] || [ ! -f "$SESSION_LOCK_PATH" ] \
+	|| [ "$(/usr/bin/stat -f '%u' "$SESSION_LOCK_PATH")" -ne 0 ] \
+	|| [ "$(/usr/bin/stat -f '%Lp' "$SESSION_LOCK_PATH")" != "600" ]; then
+	printf '%s\n' "Perky's session lock is missing or unsafe." >&2
+	exit 1
+fi
+if [ "${PERKY_INSTALL_LOCKED:-}" != "1" ]; then
+	exec /usr/bin/lockf -k "$SESSION_LOCK_PATH" /usr/bin/env PERKY_INSTALL_LOCKED=1 /bin/sh "$0" "$@"
+fi
+
+STATE_TEMP=""
+INSTALL_COMPLETE=0
+
+wait_for_service() {
+	attempt=0
+	while [ "$attempt" -lt 10 ]; do
+		if /bin/launchctl print "system/$SERVICE_LABEL" >/dev/null 2>&1 \
+			&& /usr/bin/pgrep -f "$HELPER_PROCESS_PATTERN" >/dev/null 2>&1; then
+			return 0
+		fi
+		/bin/sleep 1
+		attempt=$((attempt + 1))
+	done
+	return 1
+}
+
+clear_pending_markers() {
+	for marker in "$INSTALL_PENDING_PATH" "$UNINSTALL_PENDING_PATH"; do
+		if [ -e "$marker" ] || [ -L "$marker" ]; then
+			[ -f "$marker" ] && [ ! -L "$marker" ] || return 1
+			[ "$(/usr/bin/stat -f '%u' "$marker")" -eq 0 ] || return 1
+			[ "$(/usr/bin/stat -f '%Lp' "$marker")" = "600" ] || return 1
+			/bin/rm -f "$marker" || return 1
+		fi
+	done
+	return 0
+}
+
+# shellcheck disable=SC2329 # Called by the EXIT trap after a failed install.
+restore_previous_helper() {
+	[ -d "$ROLLBACK_DIRECTORY" ] && [ ! -L "$ROLLBACK_DIRECTORY" ] || return 1
+	[ "$(/usr/bin/stat -f '%u' "$ROLLBACK_DIRECTORY")" -eq 0 ] || return 1
+	[ "$(/usr/bin/stat -f '%Lp' "$ROLLBACK_DIRECTORY")" = "700" ] || return 1
+	[ -x "$ROLLBACK_DIRECTORY/com.perky.app.lid-helper" ] || return 1
+	[ -f "$ROLLBACK_DIRECTORY/com.perky.app.lid-helper.plist" ] || return 1
+	[ "$(/usr/bin/stat -f '%u' "$ROLLBACK_DIRECTORY/com.perky.app.lid-helper")" -eq 0 ] || return 1
+	[ "$(/usr/bin/stat -f '%u' "$ROLLBACK_DIRECTORY/com.perky.app.lid-helper.plist")" -eq 0 ] || return 1
+	/usr/bin/codesign --verify --strict "$ROLLBACK_DIRECTORY/com.perky.app.lid-helper" >/dev/null 2>&1 || return 1
+	/usr/bin/plutil -lint "$ROLLBACK_DIRECTORY/com.perky.app.lid-helper.plist" >/dev/null || return 1
+
+	HELPER_TEMP="$HELPER_PATH.restore.$$"
+	PLIST_TEMP="$LAUNCH_DAEMON_PATH.restore.$$"
+	/bin/rm -f "$HELPER_TEMP" "$PLIST_TEMP" || return 1
+	/bin/launchctl bootout "system/$SERVICE_LABEL" >/dev/null 2>&1 || true
+	/usr/bin/ditto --norsrc "$ROLLBACK_DIRECTORY/com.perky.app.lid-helper" "$HELPER_TEMP" || return 1
+	/usr/bin/ditto --norsrc "$ROLLBACK_DIRECTORY/com.perky.app.lid-helper.plist" "$PLIST_TEMP" || return 1
+	/usr/sbin/chown root:wheel "$HELPER_TEMP" "$PLIST_TEMP" || return 1
+	/bin/chmod 755 "$HELPER_TEMP" || return 1
+	/bin/chmod 644 "$PLIST_TEMP" || return 1
+	/bin/chmod -N "$HELPER_TEMP" "$PLIST_TEMP" || return 1
+	/bin/mv -f "$HELPER_TEMP" "$HELPER_PATH" || return 1
+	/bin/mv -f "$PLIST_TEMP" "$LAUNCH_DAEMON_PATH" || return 1
+	/bin/launchctl enable "system/$SERVICE_LABEL" || return 1
+	/bin/launchctl bootstrap system "$LAUNCH_DAEMON_PATH" || return 1
+	wait_for_service || return 1
+	clear_pending_markers || return 1
+	/bin/rm -rf "$ROLLBACK_DIRECTORY" || true
+	return 0
+}
+
+# shellcheck disable=SC2329 # Invoked indirectly by the EXIT trap.
+on_exit() {
+	STATUS=$?
+	trap - EXIT HUP INT TERM
+	if [ -n "$STATE_TEMP" ]; then /bin/rm -f "$STATE_TEMP" || true; fi
+	if [ "$STATUS" -ne 0 ] && [ "$INSTALL_COMPLETE" -ne 1 ]; then
+		if restore_previous_helper; then
+			printf '%s\n' "The previous Perky recovery helper was restored after this upgrade failed." >&2
+		else
+			printf 'Perky could not start the new recovery helper and could not confirm rollback. Keep this Mac awake and inspect %s.\n' \
+				"$ROLLBACK_DIRECTORY" >&2
+		fi
+	fi
+	exit "$STATUS"
+}
+
+trap on_exit EXIT
+trap 'exit 1' HUP INT TERM
 
 if [ "$(/usr/bin/id -u)" -ne 0 ]; then
 	printf '%s\n' "Perky's local package installer must run as root." >&2
@@ -34,15 +138,23 @@ if [ "$CONSOLE_UID" -eq 0 ]; then
 	exit 1
 fi
 
+if [ -L "$STATE_DIRECTORY" ] || { [ -e "$STATE_DIRECTORY" ] && [ ! -d "$STATE_DIRECTORY" ]; }; then
+	printf '%s\n' "Perky's protected state directory is not a regular directory." >&2
+	exit 1
+fi
 /usr/bin/install -d -o root -g wheel -m 700 "$STATE_DIRECTORY"
+if [ "$(/usr/bin/stat -f '%u' "$STATE_DIRECTORY")" -ne 0 ] \
+	|| [ "$(/usr/bin/stat -f '%Lp' "$STATE_DIRECTORY")" != "700" ]; then
+	printf '%s\n' "Perky's protected state directory has unexpected ownership or permissions." >&2
+	exit 1
+fi
 STATE_TEMP=$(/usr/bin/mktemp "$STATE_DIRECTORY/local-install.XXXXXX")
-trap '/bin/rm -f "$STATE_TEMP"' EXIT HUP INT TERM
 /usr/bin/plutil -create xml1 "$STATE_TEMP"
 /usr/libexec/PlistBuddy -c "Add :AuthorizedUserID integer $CONSOLE_UID" "$STATE_TEMP"
 /usr/sbin/chown root:wheel "$STATE_TEMP"
 /bin/chmod 600 "$STATE_TEMP"
 /bin/mv -f "$STATE_TEMP" "$STATE_PATH"
-trap - EXIT HUP INT TERM
+STATE_TEMP=""
 
 /bin/chmod -RN "$APP_PATH"
 /bin/chmod -N "$HELPER_PATH" "$LAUNCH_DAEMON_PATH" "$STATE_DIRECTORY" "$STATE_PATH"
@@ -66,11 +178,33 @@ for protected_path in \
 	fi
 done
 
-# Reinstall safely over an earlier local package or an old ServiceManagement
-# registration, then load the root-owned daemon from the system domain.
-/bin/launchctl bootout "system/$SERVICE_LABEL" >/dev/null 2>&1 || true
-/bin/launchctl enable "system/$SERVICE_LABEL"
-/bin/launchctl bootstrap system "$LAUNCH_DAEMON_PATH"
-/bin/launchctl print "system/$SERVICE_LABEL" >/dev/null
+if /bin/launchctl print "system/$SERVICE_LABEL" >/dev/null 2>&1; then
+	if ! /bin/launchctl bootout "system/$SERVICE_LABEL" >/dev/null 2>&1; then
+		printf '%s\n' "Perky could not stop the previous helper cleanly." >&2
+		exit 1
+	fi
+fi
+if ! /bin/launchctl enable "system/$SERVICE_LABEL"; then
+	printf '%s\n' "Perky could not enable its recovery helper." >&2
+	exit 1
+fi
+if ! /bin/launchctl bootstrap system "$LAUNCH_DAEMON_PATH"; then
+	printf '%s\n' "Perky could not load its new recovery helper." >&2
+	exit 1
+fi
+if ! wait_for_service; then
+	printf '%s\n' "Perky's new recovery helper did not reach the running state." >&2
+	exit 1
+fi
 
+clear_pending_markers || {
+	printf '%s\n' "Perky's install or uninstall gate has unexpected ownership or permissions." >&2
+	exit 1
+}
+
+INSTALL_COMPLETE=1
+if [ -d "$ROLLBACK_DIRECTORY" ]; then
+	/bin/rm -rf "$ROLLBACK_DIRECTORY" || true
+fi
+trap - EXIT HUP INT TERM
 exit 0

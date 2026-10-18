@@ -36,10 +36,12 @@ Apple 支持将 MacBook 连接外接显示器后合盖使用。需按具体机�
 
 ```sh
 ./package-local-installer.sh
-open .build/packages/Perky-0.1.0-macos-arm64-local.pkg
+open .build/packages/Perky-0.1.1-macos-arm64-local.pkg
 ```
 
 安装时 macOS 会请求管理员认证，并安装 system LaunchDaemon；这不同于登录项批准。若 Gatekeeper 阻止首次打开，请到“系统设置 > 隐私与安全性”手动允许。安装包不会调用 `sudo pmset`；helper 会在停止或到期时恢复它管理的系统状态。
+
+卸载前先在 Perky 中停止会话，并等待系统恢复状态完成。然后运行 `sudo /Applications/Perky.app/Contents/Resources/uninstall-local-package.sh`。脚本会在仍有恢复记录、升级回滚快照或 Perky 正在运行时拒绝卸载；不会删除其他共享目录中的文件。
 
 ## GitHub 构建与发行
 

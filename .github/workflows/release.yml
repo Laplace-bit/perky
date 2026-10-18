@@ -43,4 +43,4 @@ jobs:
         run: |
           gh release create "$PERKY_RELEASE_TAG" .build/packages/*.pkg .build/packages/*.pkg.sha256 \
             --title "Perky $PERKY_RELEASE_VERSION" \
-            --generate-notes
+            --notes '本机自用 macOS 安装包，未使用 Apple Developer ID 或公证。首次打开时 Gatekeeper 可能要求你在系统设置的隐私与安全性页面手动允许。安装器会请求管理员认证，用于安装 root 权限的限时恢复 helper。'

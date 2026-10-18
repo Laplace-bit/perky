@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+ROOT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 cd "$ROOT_DIR"
 
 APP_DIR=${1:-"$ROOT_DIR/.build/Perky.app"}
@@ -33,16 +33,20 @@ PAYLOAD_ROOT="$STAGING_DIR/payload"
 SCRIPTS_DIR="$STAGING_DIR/scripts"
 COMPONENT_PLIST="$STAGING_DIR/components.plist"
 STAGED_APP="$PAYLOAD_ROOT/Applications/Perky.app"
-mkdir -p "$STAGED_APP" "$PAYLOAD_ROOT/Library/LaunchDaemons" "$SCRIPTS_DIR"
+mkdir -p "$STAGED_APP/Contents/Resources" "$PAYLOAD_ROOT/Library/LaunchDaemons" "$SCRIPTS_DIR"
 mkdir -p "$PAYLOAD_ROOT/Library/PrivilegedHelperTools"
 ditto --norsrc "$APP_DIR" "$STAGED_APP"
 ditto --norsrc "$APP_DIR/Contents/MacOS/PerkyLidHelper" \
 	"$PAYLOAD_ROOT/Library/PrivilegedHelperTools/com.perky.app.lid-helper"
 chmod 755 "$PAYLOAD_ROOT/Library/PrivilegedHelperTools/com.perky.app.lid-helper"
+ditto --norsrc "$ROOT_DIR/Scripts/uninstall-local-package.sh" \
+	"$STAGED_APP/Contents/Resources/uninstall-local-package.sh"
+chmod 755 "$STAGED_APP/Contents/Resources/uninstall-local-package.sh"
 ditto --norsrc "$ROOT_DIR/com.perky.app.lid-helper.local.plist" \
 	"$PAYLOAD_ROOT/Library/LaunchDaemons/com.perky.app.lid-helper.plist"
+ditto --norsrc "$ROOT_DIR/Scripts/local-package-preinstall" "$SCRIPTS_DIR/preinstall"
 ditto --norsrc "$ROOT_DIR/Scripts/local-package-postinstall" "$SCRIPTS_DIR/postinstall"
-chmod 755 "$SCRIPTS_DIR/postinstall"
+chmod 755 "$SCRIPTS_DIR/preinstall" "$SCRIPTS_DIR/postinstall"
 
 /usr/libexec/PlistBuddy -c 'Add :PerkyLocalAdminInstall bool true' \
 	"$STAGED_APP/Contents/Info.plist"

@@ -6,6 +6,9 @@ import IOKit.pwr_mgt
 import IOKit.ps
 import Security
 
+@_silgen_name("flock")
+private func perkyFlock(_ descriptor: Int32, _ operation: Int32) -> Int32
+
 private let helperMachServiceName = "com.perky.app.lid-helper"
 private let pmsetPath = "/usr/bin/pmset"
 private let powerPreferencesPath = "/Library/Preferences/com.apple.PowerManagement.plist"
@@ -13,6 +16,9 @@ private let localAdminInstallArgument = "--perky-local-admin-install"
 private let localAppExecutablePath = "/Applications/Perky.app/Contents/MacOS/Perky"
 private let localHelperExecutablePath = "/Library/PrivilegedHelperTools/com.perky.app.lid-helper"
 private let localInstallStatePath = "/Library/Application Support/Perky/local-install.plist"
+private let localSessionLockPath = "/Library/Application Support/Perky/session.lock"
+private let localInstallPendingPath = "/Library/Application Support/Perky/install.pending"
+private let localUninstallPendingPath = "/Library/Application Support/Perky/uninstall.pending"
 
 @main
 enum PerkyLidHelperMain {
@@ -307,6 +313,16 @@ private final class LidPowerRecoveryManager: NSObject, LidPowerHelperProtocol {
     ) {
         lock.lock()
         defer { lock.unlock() }
+
+        guard let sessionLockDescriptor = acquireSessionLock() else {
+            reply(false, "无法安全锁定 Perky 的卸载状态；系统设置没有更改。")
+            return
+        }
+        defer { releaseSessionLock(sessionLockDescriptor) }
+        guard !isSessionStartBlocked() else {
+            reply(false, "Perky 正在安装或卸载；合盖模式没有启动，系统设置没有更改。")
+            return
+        }
 
         guard !identifier.isEmpty else {
             reply(false, "Perky 无法识别当前保持唤醒会话。")
@@ -1000,6 +1016,49 @@ private final class LidPowerRecoveryManager: NSObject, LidPowerHelperProtocol {
             return nil
         }
         return record
+    }
+
+    private func acquireSessionLock() -> Int32? {
+        let directoryPath = URL(fileURLWithPath: localSessionLockPath).deletingLastPathComponent().path
+        var directoryInformation = stat()
+        guard lstat(directoryPath, &directoryInformation) == 0,
+              directoryInformation.st_mode & S_IFMT == S_IFDIR,
+              directoryInformation.st_uid == 0,
+              directoryInformation.st_mode & 0o777 == 0o700 else { return nil }
+
+        let descriptor = open(localSessionLockPath, O_CREAT | O_RDWR | O_NOFOLLOW, mode_t(0o600))
+        guard descriptor >= 0 else { return nil }
+        var fileInformation = stat()
+        guard fstat(descriptor, &fileInformation) == 0,
+              fileInformation.st_mode & S_IFMT == S_IFREG,
+              fileInformation.st_uid == 0,
+              fileInformation.st_nlink == 1,
+              fileInformation.st_mode & 0o777 == 0o600 else {
+            _ = close(descriptor)
+            return nil
+        }
+
+        while perkyFlock(descriptor, LOCK_EX) == -1 {
+            if errno == EINTR { continue }
+            _ = close(descriptor)
+            return nil
+        }
+        return descriptor
+    }
+
+    private func releaseSessionLock(_ descriptor: Int32) {
+        _ = perkyFlock(descriptor, LOCK_UN)
+        _ = close(descriptor)
+    }
+
+    private func isSessionStartBlocked() -> Bool {
+        for path in [localInstallPendingPath, localUninstallPendingPath] {
+            var information = stat()
+            if lstat(path, &information) == 0 || errno != ENOENT {
+                return true
+            }
+        }
+        return false
     }
 
     @discardableResult
