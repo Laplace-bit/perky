@@ -1,4 +1,5 @@
 import Foundation
+import PerkyCore
 import PerkyHelperShared
 import Security
 import ServiceManagement
@@ -36,7 +37,17 @@ final class LidPowerHelperClient {
     var hasTrustedSigningIdentity: Bool { cachedTrustedTeamIdentifier != nil }
 
     func register() -> String {
-        guard hasTrustedSigningIdentity else { return authorizationMessage }
+        guard hasTrustedSigningIdentity else {
+            if HelperAuthorizationSettingsPolicy.shouldOpenLoginItems(
+                state: authorizationState,
+                hasTrustedSigningIdentity: false,
+                initiatedByUser: true
+            ) {
+                LoginItemsSettingsOpener.open()
+                return untrustedSettingsMessage
+            }
+            return authorizationMessage
+        }
         if service.status == .enabled {
             return "恢复 helper 已获准运行。"
         }
@@ -48,15 +59,38 @@ final class LidPowerHelperClient {
             }
         }
 
-        if service.status == .requiresApproval {
-            SMAppService.openSystemSettingsLoginItems()
+        if HelperAuthorizationSettingsPolicy.shouldOpenLoginItems(
+            state: authorizationState,
+            hasTrustedSigningIdentity: true,
+            initiatedByUser: true
+        ) {
+            LoginItemsSettingsOpener.open()
             return "已登记恢复 helper。请在系统设置 > 通用 > 登录项中允许 Perky。"
         }
         return authorizationMessage
     }
 
-    func openLoginItemsSettings() {
-        SMAppService.openSystemSettingsLoginItems()
+    func openLoginItemsSettings() -> String {
+        LoginItemsSettingsOpener.open()
+        return hasTrustedSigningIdentity ? trustedSettingsMessage : untrustedSettingsMessage
+    }
+
+    private var authorizationState: HelperServiceAuthorizationState {
+        switch service.status {
+        case .enabled: return .enabled
+        case .requiresApproval: return .requiresApproval
+        case .notRegistered: return .notRegistered
+        case .notFound: return .notFound
+        @unknown default: return .unknown
+        }
+    }
+
+    private var untrustedSettingsMessage: String {
+        "已打开系统设置 > 通用 > 登录项。当前构建没有 Apple 信任签名，无法安装恢复 helper，Perky 不会出现在可批准列表中。"
+    }
+
+    private var trustedSettingsMessage: String {
+        "已打开系统设置 > 通用 > 登录项。若 Perky 显示在后台活动中，请允许恢复 helper。"
     }
 
     func startSession(

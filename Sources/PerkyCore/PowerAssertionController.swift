@@ -2,13 +2,13 @@ import CoreFoundation
 import Foundation
 import IOKit.pwr_mgt
 
-enum PowerAssertionFailure: LocalizedError {
+public enum PowerAssertionFailure: LocalizedError {
     case createFailed(IOReturn)
     case verificationFailed
     case timeoutUpdateFailed(IOReturn)
     case releaseFailed(IOReturn)
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .createFailed(let status):
             return "macOS 无法创建防睡眠断言（\(Self.statusCode(status))）。请稍后重试。"
@@ -26,17 +26,19 @@ enum PowerAssertionFailure: LocalizedError {
     }
 }
 
-struct PowerAssertionController {
-    private(set) var assertionID: IOPMAssertionID?
+public struct PowerAssertionController {
+    public private(set) var assertionID: IOPMAssertionID?
 
-    var hasAssertion: Bool { assertionID != nil }
+    public init() {}
 
-    var isActive: Bool {
+    public var hasAssertion: Bool { assertionID != nil }
+
+    public var isActive: Bool {
         guard let assertionID else { return false }
         return verifiedProperties(for: assertionID) != nil
     }
 
-    mutating func start(timeoutSeconds: Int) -> Result<Void, PowerAssertionFailure> {
+    public mutating func start(timeoutSeconds: Int) -> Result<Void, PowerAssertionFailure> {
         guard assertionID == nil else {
             return isActive ? .success(()) : .failure(.verificationFailed)
         }
@@ -68,7 +70,7 @@ struct PowerAssertionController {
         return .success(())
     }
 
-    mutating func resume(timeoutSeconds: Int) -> Result<Void, PowerAssertionFailure> {
+    public mutating func resume(timeoutSeconds: Int) -> Result<Void, PowerAssertionFailure> {
         guard let assertionID else { return start(timeoutSeconds: timeoutSeconds) }
         if isActive { return updateTimeout(seconds: timeoutSeconds) }
 
@@ -93,7 +95,7 @@ struct PowerAssertionController {
         return .success(())
     }
 
-    mutating func updateTimeout(seconds: Int) -> Result<Void, PowerAssertionFailure> {
+    public mutating func updateTimeout(seconds: Int) -> Result<Void, PowerAssertionFailure> {
         guard let assertionID else { return .failure(.verificationFailed) }
         var value = Int32(seconds)
         guard let timeout = CFNumberCreate(kCFAllocatorDefault, .sInt32Type, &value) else {
@@ -110,7 +112,7 @@ struct PowerAssertionController {
         return .success(())
     }
 
-    mutating func stop() -> Result<Void, PowerAssertionFailure> {
+    public mutating func stop() -> Result<Void, PowerAssertionFailure> {
         guard let assertionID else { return .success(()) }
         let status = IOPMAssertionRelease(assertionID)
         if status == kIOReturnSuccess || copyProperties(for: assertionID) == nil {

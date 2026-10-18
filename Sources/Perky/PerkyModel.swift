@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import IOKit.pwr_mgt
+import PerkyCore
 import SwiftUI
 import UserNotifications
 
@@ -90,13 +91,15 @@ final class PerkyModel: ObservableObject {
 
     private init() {
         let savedMinutes = userDefaults.object(forKey: selectedMinutesKey) as? Int ?? 30
-        selectedMinutes = min(max(savedMinutes, 1), 1440)
+        selectedMinutes = DurationPolicy.clampedStoredMinutes(savedMinutes)
         customMinutesText = String(userDefaults.object(forKey: customMinutesKey) as? Int ?? savedMinutes)
         isCustomDurationSelected = userDefaults.bool(forKey: customSelectedKey)
         notificationsEnabled = userDefaults.bool(forKey: notificationsEnabledKey)
         isLidModeEnabled = userDefaults.bool(forKey: lidModeEnabledKey)
         brightnessAutomationEnabled = userDefaults.bool(forKey: brightnessAutomationEnabledKey)
-        brightnessTargetPercent = min(max(userDefaults.object(forKey: brightnessTargetPercentKey) as? Int ?? 10, 5), 30)
+        brightnessTargetPercent = BrightnessPolicy.clampedTargetPercent(
+            userDefaults.object(forKey: brightnessTargetPercentKey) as? Int ?? 10
+        )
         batteryThresholdPercent = min(max(userDefaults.object(forKey: batteryThresholdPercentKey) as? Int ?? 15, 5), 50)
         helperRecoveryIdentifier = userDefaults.string(forKey: helperRecoveryIdentifierKey)
         helperRecoveryDeadline = userDefaults.object(forKey: helperRecoveryDeadlineKey) as? Date
@@ -126,16 +129,14 @@ final class PerkyModel: ObservableObject {
 
     var selectedDuration: Int? {
         guard isCustomDurationSelected else { return selectedMinutes }
-        guard let value = Int(customMinutesText), (1...1440).contains(value) else { return nil }
-        return value
+        return DurationPolicy.parseCustomMinutes(customMinutesText)
     }
 
     var customDurationError: String? {
         guard isCustomDurationSelected else { return nil }
-        guard let value = Int(customMinutesText), (1...1440).contains(value) else {
-            return "请输入 1–1440 分钟的整数。"
-        }
-        return nil
+        return DurationPolicy.parseCustomMinutes(customMinutesText) == nil
+            ? "请输入 1–1440 分钟的整数。"
+            : nil
     }
 
     var batteryConfirmationMessage: String {
@@ -185,7 +186,7 @@ final class PerkyModel: ObservableObject {
     }
 
     func selectQuickDuration(_ minutes: Int) {
-        guard [15, 30, 60].contains(minutes) else { return }
+        guard DurationPolicy.quickChoices.contains(minutes) else { return }
         selectedMinutes = minutes
         isCustomDurationSelected = false
         persistDurationPreferences()
@@ -253,7 +254,7 @@ final class PerkyModel: ObservableObject {
     }
 
     func openLidHelperSettings() {
-        lidPowerHelper.openLoginItemsSettings()
+        helperStatusMessage = lidPowerHelper.openLoginItemsSettings()
     }
 
     func setBrightnessAutomationEnabled(_ enabled: Bool) {
@@ -278,7 +279,7 @@ final class PerkyModel: ObservableObject {
     }
 
     func setBrightnessTargetPercent(_ value: Int) {
-        brightnessTargetPercent = min(max(value, 5), 30)
+        brightnessTargetPercent = BrightnessPolicy.clampedTargetPercent(value)
         userDefaults.set(brightnessTargetPercent, forKey: brightnessTargetPercentKey)
         if brightnessRestoreRecord != nil, isLidModeActive {
             applyClosedLidBrightness()
@@ -302,7 +303,11 @@ final class PerkyModel: ObservableObject {
         }
         let snapshot = LidModeSnapshot.current()
         updateSnapshot(snapshot)
-        if let failure = batteryStartFailure(for: snapshot) {
+        if let failure = BatterySafetyPolicy.failureMessage(
+            for: snapshot,
+            thresholdPercent: batteryThresholdPercent,
+            whileRunning: false
+        ) {
             failureMessage = failure
             return
         }
@@ -408,30 +413,21 @@ final class PerkyModel: ObservableObject {
                 return
             }
             guard lidPowerHelper.isEnabled else {
-                helperStatusMessage = lidPowerHelper.authorizationMessage
+                helperStatusMessage = lidPowerHelper.register()
                 helperCanRegister = lidPowerHelper.hasTrustedSigningIdentity
                 helperNeedsApproval = lidPowerHelper.requiresApproval
-                if helperNeedsApproval && helperCanRegister {
-                    lidPowerHelper.openLoginItemsSettings()
-                    failureMessage = "已打开系统设置 > 通用 > 登录项。允许 Perky 后返回并重新检查授权；基础保持唤醒仍可使用。"
-                } else {
-                    failureMessage = "合盖恢复 helper 尚未获准运行。\(helperStatusMessage)基础保持唤醒仍可单独使用。"
-                }
+                failureMessage = "\(helperStatusMessage)基础保持唤醒仍可单独使用。"
+                return
+            }
+            if let safetyFailure = BatterySafetyPolicy.failureMessage(
+                for: snapshot,
+                thresholdPercent: batteryThresholdPercent,
+                whileRunning: false
+            ) {
+                failureMessage = safetyFailure
                 return
             }
             if !snapshot.isOnACPower {
-                guard let battery = snapshot.batteryPercent else {
-                    failureMessage = "无法确认当前电量。为保护电池，Perky 没有启动合盖模式。"
-                    return
-                }
-                guard !snapshot.isLowPowerModeEnabled else {
-                    failureMessage = "电池供电时已启用低电量模式。请接入电源或关闭低电量模式后再启动。"
-                    return
-                }
-                guard battery > batteryThresholdPercent else {
-                    failureMessage = "当前电量为 \(battery)%，已达到自动停止阈值 \(batteryThresholdPercent)%。请接入电源后再启动。"
-                    return
-                }
                 isShowingBatteryConfirmation = true
                 return
             }
@@ -1161,17 +1157,7 @@ final class PerkyModel: ObservableObject {
     }
 
     private func batteryStartFailure(for snapshot: LidModeSnapshot) -> String? {
-        guard !snapshot.isOnACPower else { return nil }
-        guard let battery = snapshot.batteryPercent else {
-            return "無法讀取電池電量，已停止合蓋模式以保護電池。"
-        }
-        if snapshot.isLowPowerModeEnabled {
-            return "電池供電時進入低電量模式，已停止保持唤醒並恢復系統睡眠。"
-        }
-        if battery <= batteryThresholdPercent {
-            return String(format: "电量达到 %d%%，已停止保持唤醒并恢复系统睡眠。", batteryThresholdPercent)
-        }
-        return nil
+        BatterySafetyPolicy.failureMessage(for: snapshot, thresholdPercent: batteryThresholdPercent)
     }
 
     private func startSafetyMonitor() {
@@ -1188,7 +1174,7 @@ final class PerkyModel: ObservableObject {
 
     private func applyClosedLidBrightness() {
         guard brightnessAutomationEnabled, isLidModeActive, currentLidClosed == true else { return }
-        let target = Float(brightnessTargetPercent) / 100
+        let target = BrightnessPolicy.normalizedTarget(brightnessTargetPercent)
         var record = brightnessRestoreRecord
         if record == nil {
             guard var captured = brightnessController.captureCurrentBrightness() else {
@@ -1232,7 +1218,7 @@ final class PerkyModel: ObservableObject {
             brightnessStatusMessage = "无法保存内建屏幕原亮度；亮度自动调节会保持未应用。"
             return
         }
-        record.targetValue = Float(brightnessTargetPercent) / 100
+        record.targetValue = BrightnessPolicy.normalizedTarget(brightnessTargetPercent)
         guard persistBrightnessRestoreRecord(record) else {
             brightnessStatusMessage = "无法保存亮度恢复记录；Perky 不会更改屏幕亮度。"
             return

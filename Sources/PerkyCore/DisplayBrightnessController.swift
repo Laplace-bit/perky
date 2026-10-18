@@ -4,8 +4,8 @@ import Foundation
 
 /// DisplayServices is a private SPI. We load it dynamically and only expose the
 /// feature on the macOS major version that has been checked in this project.
-final class DisplayBrightnessController {
-    static let shared = DisplayBrightnessController()
+public final class DisplayBrightnessController {
+    public static let shared = DisplayBrightnessController()
 
     private typealias CanChangeBrightness = @convention(c) (UInt32) -> Bool
     private typealias GetBrightness = @convention(c) (UInt32, UnsafeMutablePointer<Float>) -> Int32
@@ -39,7 +39,7 @@ final class DisplayBrightnessController {
         )
     }
 
-    var availabilityMessage: String {
+    public var availabilityMessage: String {
         guard ProcessInfo.processInfo.operatingSystemVersion.majorVersion == 26 else {
             return "亮度接口目前只在 macOS 26.x 完成运行时验证。"
         }
@@ -49,7 +49,7 @@ final class DisplayBrightnessController {
         return "内建屏幕亮度接口可用；外接显示器不受控制。"
     }
 
-    var isAvailable: Bool {
+    public var isAvailable: Bool {
         guard let displayID = builtInDisplayID(),
               let functions,
               functions.canChange(displayID) else {
@@ -58,7 +58,7 @@ final class DisplayBrightnessController {
         return currentBrightness(displayID: displayID) != nil
     }
 
-    func captureCurrentBrightness() -> BrightnessRestoreRecord? {
+    public func captureCurrentBrightness() -> BrightnessRestoreRecord? {
         guard let displayID = builtInDisplayID(),
               let value = currentBrightness(displayID: displayID) else {
             return nil
@@ -71,7 +71,7 @@ final class DisplayBrightnessController {
         )
     }
 
-    func currentBrightness(displayID: UInt32) -> Float? {
+    public func currentBrightness(displayID: UInt32) -> Float? {
         guard let functions, functions.canChange(displayID) else { return nil }
         var value: Float = 0
         guard functions.get(displayID, &value) == 0, value.isFinite, (0...1).contains(value) else {
@@ -80,7 +80,7 @@ final class DisplayBrightnessController {
         return value
     }
 
-    func setBrightness(_ value: Float, displayID: UInt32) -> Bool {
+    public func setBrightness(_ value: Float, displayID: UInt32) -> Bool {
         guard value.isFinite, (0...1).contains(value),
               let functions, functions.canChange(displayID),
               functions.set(displayID, value) == 0 else {
@@ -100,9 +100,16 @@ final class DisplayBrightnessController {
     }
 }
 
-struct BrightnessRestoreRecord: Codable {
-    let displayID: UInt32
-    let originalValue: Float
-    var targetValue: Float
-    var lastAppliedValue: Float?
+public struct BrightnessRestoreRecord: Codable {
+    public let displayID: UInt32
+    public let originalValue: Float
+    public var targetValue: Float
+    public var lastAppliedValue: Float?
+
+    public init(displayID: UInt32, originalValue: Float, targetValue: Float, lastAppliedValue: Float?) {
+        self.displayID = displayID
+        self.originalValue = originalValue
+        self.targetValue = targetValue
+        self.lastAppliedValue = lastAppliedValue
+    }
 }

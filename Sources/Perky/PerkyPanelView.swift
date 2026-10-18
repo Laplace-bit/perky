@@ -141,7 +141,7 @@ struct PerkyPanelView: View {
                     Label(
                         model.helperNeedsApproval && model.helperCanRegister
                             ? "等待系统批准"
-                            : (model.helperCanRegister ? "需要系统授权" : "需要 Apple 信任签名"),
+                            : (model.helperCanRegister ? "需要系统授权" : "当前版本无法批准"),
                         systemImage: "exclamationmark.circle"
                     )
                     .help(model.helperStatusMessage)
@@ -157,10 +157,20 @@ struct PerkyPanelView: View {
                     } else if model.helperCanRegister {
                         Button("授权") { model.registerLidHelper() }
                             .buttonStyle(.borderless)
+                    } else {
+                        Button("打开登录项") { model.openLidHelperSettings() }
+                            .buttonStyle(.borderless)
                     }
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+                if !model.helperCanRegister {
+                    Text("需 Apple 信任签名后，Perky 才会出现在批准列表中。")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
             Button {

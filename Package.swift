@@ -6,16 +6,27 @@ let package = Package(
     platforms: [.macOS(.v14)],
     products: [
         .executable(name: "Perky", targets: ["Perky"]),
-        .executable(name: "PerkyLidHelper", targets: ["PerkyHelper"])
+        .executable(name: "PerkyLidHelper", targets: ["PerkyHelper"]),
+        .executable(name: "PerkyFeatureChecks", targets: ["PerkyFeatureChecks"])
     ],
     targets: [
+        .target(
+            name: "PerkyCore",
+            path: "Sources/PerkyCore",
+            linkerSettings: [
+                .linkedFramework("AppKit"),
+                .linkedFramework("CoreGraphics"),
+                .linkedFramework("IOKit"),
+                .linkedFramework("ServiceManagement")
+            ]
+        ),
         .target(
             name: "PerkyHelperShared",
             path: "Sources/PerkyHelperShared"
         ),
         .executableTarget(
             name: "Perky",
-            dependencies: ["PerkyHelperShared"],
+            dependencies: ["PerkyCore", "PerkyHelperShared"],
             path: "Sources/Perky",
             linkerSettings: [
                 .linkedFramework("IOKit"),
@@ -34,10 +45,11 @@ let package = Package(
                 .linkedFramework("Security")
             ]
         ),
-        .testTarget(
-            name: "PerkyTests",
-            dependencies: ["Perky"],
-            path: "Tests/PerkyTests"
+        .executableTarget(
+            name: "PerkyFeatureChecks",
+            dependencies: ["PerkyCore"],
+            path: "Tests/PerkyFeatureChecks",
+            linkerSettings: [.linkedFramework("IOKit")]
         )
     ]
 )

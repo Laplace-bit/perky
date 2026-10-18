@@ -20,7 +20,13 @@ Perky 面向 **macOS 14 及以上版本**。基础保持唤醒、可选合盖运
 ./build-app.sh
 ```
 
-应用会生成在 `.build/Perky.app`。本地 ad-hoc 签名可用于基础模式；合盖恢复 helper 需要有效的 Apple Development 或 Developer ID 签名身份。
+脚本会先运行 `PerkyFeatureChecks`，再编译、签名并校验完整应用包。检查覆盖时长边界、合盖兼容条件、电池保护、登录项授权路由、亮度范围、只读硬件探测和防睡眠断言的创建/更新/恢复/释放。需要单独确认系统设置跳转时运行 `swift run --configuration release PerkyFeatureChecks --system-smoke`；这会打开“登录项与扩展”。
+
+应用会生成在 `.build/Perky.app`。打包使用 `-Osize`，并只对发行副本执行 `strip -x`，保留 Swift 运行所需符号并去除本地符号表；当前 macOS arm64 包约 568 KB。本地 ad-hoc 签名可用于基础模式；合盖恢复 helper 需要有效的 Apple Development 或 Developer ID 签名身份。
+
+## GitHub 构建与发行
+
+推送到 `main` 后，GitHub Actions 会运行功能检查并生成 arm64 DMG、ZIP 和 SHA-256 文件作为构建产物。正式发行由 `v*` 标签触发，流程会签名、公证并发布 GitHub Release；没有签名、公证凭据时会在发布前失败，不会把 ad-hoc 包标成正式版本。仓库管理员需要在 Actions secrets 中配置 `PERKY_CODESIGN_IDENTITY`、`APPLE_DEVELOPER_ID_CERTIFICATE_P12_BASE64`、`APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD`、`APPLE_NOTARY_KEY_P8_BASE64`、`APPLE_NOTARY_KEY_ID` 和 `APPLE_NOTARY_ISSUER_ID`。证书须是 Developer ID Application，公证密钥须来自 Apple Developer 团队。
 
 ## 品牌与兼容性声明
 
