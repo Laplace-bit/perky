@@ -1,0 +1,76 @@
+#!/bin/sh
+set -eu
+
+APP_PATH="/Applications/Perky.app"
+HELPER_PATH="/Library/PrivilegedHelperTools/com.perky.app.lid-helper"
+LAUNCH_DAEMON_PATH="/Library/LaunchDaemons/com.perky.app.lid-helper.plist"
+SERVICE_LABEL="com.perky.app.lid-helper"
+STATE_DIRECTORY="/Library/Application Support/Perky"
+STATE_PATH="$STATE_DIRECTORY/local-install.plist"
+
+if [ "$(/usr/bin/id -u)" -ne 0 ]; then
+	printf '%s\n' "Perky's local package installer must run as root." >&2
+	exit 1
+fi
+if [ ! -d "$APP_PATH" ] || [ -L "$APP_PATH" ]; then
+	printf '%s\n' "Perky.app was not installed as a regular application bundle." >&2
+	exit 1
+fi
+if [ ! -x "$APP_PATH/Contents/MacOS/Perky" ] || [ ! -x "$APP_PATH/Contents/MacOS/PerkyLidHelper" ]; then
+	printf '%s\n' "Perky's application or recovery helper is missing." >&2
+	exit 1
+fi
+if [ ! -x "$HELPER_PATH" ]; then
+	printf '%s\n' "Perky's privileged recovery helper is missing." >&2
+	exit 1
+fi
+
+CONSOLE_UID=$(/usr/bin/stat -f '%u' /dev/console)
+case "$CONSOLE_UID" in
+	''|*[!0-9]*) printf '%s\n' "Could not identify the installing console user." >&2; exit 1 ;;
+esac
+if [ "$CONSOLE_UID" -eq 0 ]; then
+	printf '%s\n' "Log in to the Mac desktop before installing Perky." >&2
+	exit 1
+fi
+
+/usr/bin/install -d -o root -g wheel -m 700 "$STATE_DIRECTORY"
+STATE_TEMP=$(/usr/bin/mktemp "$STATE_DIRECTORY/local-install.XXXXXX")
+trap '/bin/rm -f "$STATE_TEMP"' EXIT HUP INT TERM
+/usr/bin/plutil -create xml1 "$STATE_TEMP"
+/usr/libexec/PlistBuddy -c "Add :AuthorizedUserID integer $CONSOLE_UID" "$STATE_TEMP"
+/usr/sbin/chown root:wheel "$STATE_TEMP"
+/bin/chmod 600 "$STATE_TEMP"
+/bin/mv -f "$STATE_TEMP" "$STATE_PATH"
+trap - EXIT HUP INT TERM
+
+/bin/chmod -RN "$APP_PATH"
+/bin/chmod -N "$HELPER_PATH" "$LAUNCH_DAEMON_PATH" "$STATE_DIRECTORY" "$STATE_PATH"
+/usr/sbin/chown root:wheel "$LAUNCH_DAEMON_PATH"
+/bin/chmod 644 "$LAUNCH_DAEMON_PATH"
+/usr/sbin/chown root:wheel "$HELPER_PATH"
+/bin/chmod 755 "$HELPER_PATH"
+
+for protected_path in \
+	"$APP_PATH" \
+	"$APP_PATH/Contents" \
+	"$APP_PATH/Contents/MacOS" \
+	"$APP_PATH/Contents/MacOS/Perky" \
+	"$HELPER_PATH" \
+	"$LAUNCH_DAEMON_PATH" \
+	"$STATE_DIRECTORY" \
+	"$STATE_PATH"; do
+	if [ "$(/usr/bin/stat -f '%u' "$protected_path")" -ne 0 ]; then
+		printf 'Expected a root-owned file or directory: %s\n' "$protected_path" >&2
+		exit 1
+	fi
+done
+
+# Reinstall safely over an earlier local package or an old ServiceManagement
+# registration, then load the root-owned daemon from the system domain.
+/bin/launchctl bootout "system/$SERVICE_LABEL" >/dev/null 2>&1 || true
+/bin/launchctl enable "system/$SERVICE_LABEL"
+/bin/launchctl bootstrap system "$LAUNCH_DAEMON_PATH"
+/bin/launchctl print "system/$SERVICE_LABEL" >/dev/null
+
+exit 0

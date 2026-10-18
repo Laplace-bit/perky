@@ -10,11 +10,24 @@ final class LidPowerHelperClient {
 
     private let service = SMAppService.daemon(plistName: "com.perky.app.lid-helper.plist")
     private let machServiceName = "com.perky.app.lid-helper"
+    private let localInstallBundlePath = "/Applications/Perky.app"
+    private let launchDaemonLabel = "com.perky.app.lid-helper"
     private lazy var cachedTrustedTeamIdentifier = Self.readTrustedTeamIdentifier()
     private var queuedMutations: [(@escaping () -> Void) -> Void] = []
     private var mutationInFlight = false
+    private var cachedLocalHelperStatus: (checkedAt: Date, isRunning: Bool)?
+
+    var usesLocalAdminInstall: Bool {
+        Bundle.main.infoDictionary?["PerkyLocalAdminInstall"] as? Bool == true
+            && Bundle.main.bundleURL.standardizedFileURL.path == localInstallBundlePath
+    }
 
     var authorizationMessage: String {
+        if usesLocalAdminInstall {
+            return localAdminHelperIsRunning
+                ? "本机恢复 helper 已安装并加载。"
+                : "本机恢复 helper 未运行。请重新安装 Perky 本机安装包后再试。"
+        }
         guard hasTrustedSigningIdentity else {
             return "当前构建未使用 Apple 信任的签名；合盖运行需要 Apple Development 或 Developer ID 签名后才能安装恢复助手。"
         }
@@ -32,11 +45,16 @@ final class LidPowerHelperClient {
         }
     }
 
-    var isEnabled: Bool { service.status == .enabled && hasTrustedSigningIdentity }
-    var requiresApproval: Bool { service.status == .requiresApproval }
+    var isEnabled: Bool {
+        usesLocalAdminInstall ? localAdminHelperIsRunning : service.status == .enabled && hasTrustedSigningIdentity
+    }
+    var requiresApproval: Bool { !usesLocalAdminInstall && service.status == .requiresApproval }
     var hasTrustedSigningIdentity: Bool { cachedTrustedTeamIdentifier != nil }
 
     func register() -> String {
+        if usesLocalAdminInstall {
+            return authorizationMessage
+        }
         guard hasTrustedSigningIdentity else {
             if HelperAuthorizationSettingsPolicy.shouldOpenLoginItems(
                 state: authorizationState,
@@ -71,8 +89,34 @@ final class LidPowerHelperClient {
     }
 
     func openLoginItemsSettings() -> String {
+        if usesLocalAdminInstall {
+            return authorizationMessage
+        }
         LoginItemsSettingsOpener.open()
         return hasTrustedSigningIdentity ? trustedSettingsMessage : untrustedSettingsMessage
+    }
+
+    private var localAdminHelperIsRunning: Bool {
+        if let cachedLocalHelperStatus,
+           Date().timeIntervalSince(cachedLocalHelperStatus.checkedAt) < 2 {
+            return cachedLocalHelperStatus.isRunning
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        process.arguments = ["print", "system/\(launchDaemonLabel)"]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        let isRunning: Bool
+        do {
+            try process.run()
+            process.waitUntilExit()
+            isRunning = process.terminationStatus == 0
+        } catch {
+            isRunning = false
+        }
+        cachedLocalHelperStatus = (Date(), isRunning)
+        return isRunning
     }
 
     private var authorizationState: HelperServiceAuthorizationState {

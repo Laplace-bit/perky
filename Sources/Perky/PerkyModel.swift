@@ -18,7 +18,7 @@ final class PerkyModel: ObservableObject {
     @Published private(set) var isStopping = false
     @Published private(set) var deadline: Date?
     @Published private(set) var failureMessage: String?
-    @Published private(set) var statusMessage = "只防止空闲睡眠，显示器仍按系统设置关闭。"
+    @Published private(set) var statusMessage = "合盖运行尚未启动。确认模式后选择时长并开始。"
     @Published private(set) var notificationMessage: String?
     @Published private(set) var diagnosticsMessage: String?
     @Published private(set) var notificationsEnabled = false
@@ -32,11 +32,12 @@ final class PerkyModel: ObservableObject {
     @Published private(set) var helperIsEnabled = false
     @Published private(set) var helperCanRegister = false
     @Published private(set) var helperNeedsApproval = false
+    var helperUsesLocalAdminInstall: Bool { lidPowerHelper.usesLocalAdminInstall }
     @Published private(set) var helperRecoveryMessage: String?
     @Published private(set) var helperRecoveryDeadline: Date?
     @Published private(set) var helperRecoveryIdentifier: String?
     @Published private(set) var helperHasConflict = false
-    @Published private(set) var lidModeStatusMessage = "合盖运行关闭；只保持唤醒不会修改系统睡眠设置。"
+    @Published private(set) var lidModeStatusMessage = "合盖运行关闭；之后由 macOS 当前电源设置决定是否睡眠。"
     @Published private(set) var lidReadinessMessage = "正在检查合盖与电源状态…"
     @Published private(set) var currentBatteryPercent: Int?
     @Published private(set) var isOnACPower = false
@@ -67,6 +68,7 @@ final class PerkyModel: ObservableObject {
     private var helperRecoveryStatusGeneration = 0
     private var recoveryOperationsInFlight = 0
     private var activeLidSessionIdentifier: String?
+    private var didConfirmLidModeSetup = false
     private var safetyMonitorTimer: Timer?
     private var clamshellObserver = ClamshellStateObserver()
     private var screenParametersObserver: NSObjectProtocol?
@@ -95,7 +97,10 @@ final class PerkyModel: ObservableObject {
         customMinutesText = String(userDefaults.object(forKey: customMinutesKey) as? Int ?? savedMinutes)
         isCustomDurationSelected = userDefaults.bool(forKey: customSelectedKey)
         notificationsEnabled = userDefaults.bool(forKey: notificationsEnabledKey)
-        isLidModeEnabled = userDefaults.bool(forKey: lidModeEnabledKey)
+        let savedLidModeEnabled = userDefaults.object(forKey: lidModeEnabledKey) as? Bool
+        isLidModeEnabled = savedLidModeEnabled ?? true
+        isShowingLidExplanation = savedLidModeEnabled == nil
+        didConfirmLidModeSetup = savedLidModeEnabled != nil
         brightnessAutomationEnabled = userDefaults.bool(forKey: brightnessAutomationEnabledKey)
         brightnessTargetPercent = BrightnessPolicy.clampedTargetPercent(
             userDefaults.object(forKey: brightnessTargetPercentKey) as? Int ?? 10
@@ -145,7 +150,7 @@ final class PerkyModel: ObservableObject {
     }
 
     var quitConfirmationMessage: String {
-        "Perky 会停止计时，并尝试恢复系统睡眠设置和屏幕亮度。"
+        "Perky 会停止计时，并尝试恢复自己改动过的系统电源状态和屏幕亮度。"
     }
 
     var customDurationStepperValue: Binding<Int> {
@@ -170,7 +175,7 @@ final class PerkyModel: ObservableObject {
 
     var menuBarSymbol: String {
         if isRunning {
-            return "sun.max.fill"
+            return isLidModeActive ? "laptopcomputer.and.arrow.down" : "sun.max.fill"
         }
         return "moon.zzz"
     }
@@ -180,9 +185,10 @@ final class PerkyModel: ObservableObject {
             return "Perky，正在停止保持唤醒"
         }
         if isRunning {
-            return "Perky，基础保持唤醒中，剩余 \(menuBarRemainingText)"
+            let mode = isLidModeActive ? "合盖运行中" : "保持唤醒中"
+            return "Perky，\(mode)，剩余 \(menuBarRemainingText)"
         }
-        return "Perky，未保持唤醒"
+        return "Perky，合盖运行未启动"
     }
 
     func selectQuickDuration(_ minutes: Int) {
@@ -198,10 +204,12 @@ final class PerkyModel: ObservableObject {
     }
 
     func requestLidModeEnable() {
+        didConfirmLidModeSetup = false
         isShowingLidExplanation = true
     }
 
     func confirmLidModeSetup() {
+        didConfirmLidModeSetup = true
         isShowingLidExplanation = false
         isLidModeEnabled = true
         userDefaults.set(true, forKey: lidModeEnabledKey)
@@ -209,23 +217,27 @@ final class PerkyModel: ObservableObject {
         helperIsEnabled = lidPowerHelper.isEnabled
         helperCanRegister = lidPowerHelper.hasTrustedSigningIdentity
         helperNeedsApproval = lidPowerHelper.requiresApproval
-        lidModeStatusMessage = "已选择合盖模式。启用时 Perky 会临时设置 SleepDisabled=1，并按绝对截止时间恢复。"
+        lidModeStatusMessage = "已选择合盖运行。Perky 会优先限时改变合盖睡眠策略；必要时使用系统级回退，并在停止或到期时恢复。"
         refreshHelperRecoveryStatus()
     }
 
     func cancelLidModeSetup() {
+        guard isShowingLidExplanation else { return }
         isShowingLidExplanation = false
+        isLidModeEnabled = false
+        userDefaults.set(false, forKey: lidModeEnabledKey)
+        statusMessage = "合盖运行未启动。普通保持唤醒不会控制合盖睡眠。"
     }
 
     func disableLidMode() {
         isLidModeEnabled = false
         userDefaults.set(false, forKey: lidModeEnabledKey)
         if isStarting {
-            lidModeStatusMessage = "正在启动合盖模式；启动完成后会立即撤销系统级设置，基础保持唤醒会继续。"
+            lidModeStatusMessage = "正在启动合盖模式；启动完成后会恢复合盖睡眠策略，基础保持唤醒会继续。"
             return
         }
         guard isLidModeActive else {
-            lidModeStatusMessage = "合盖运行关闭；只保持唤醒不会修改系统睡眠设置。"
+            lidModeStatusMessage = "合盖运行关闭；之后由 macOS 当前电源设置决定是否睡眠。"
             return
         }
         stopLidModeOnly()
@@ -389,6 +401,11 @@ final class PerkyModel: ObservableObject {
 
     func start() {
         guard !isRunning, !isStopping, !isStarting else { return }
+        guard !isShowingLidExplanation,
+              !isLidModeEnabled || didConfirmLidModeSetup else {
+            failureMessage = "请先确认合盖运行说明，再启动合盖会话。"
+            return
+        }
         if !helperRecoveryStatusLoaded && helperIsEnabled {
             refreshHelperRecoveryStatus()
             failureMessage = "正在检查独立恢复助手的状态，请检查完成后再启动新计时。"
@@ -536,7 +553,7 @@ final class PerkyModel: ObservableObject {
         didNotifyStopFailure = false
         deadline = requestedDeadline
         statusMessage = isLidModeActive
-            ? "合盖模式运行中 · SleepDisabled 将按时恢复"
+            ? "合盖运行中 · 到期自动恢复 macOS 睡眠策略"
             : "保持唤醒中 · 仅防止空闲睡眠"
         sessionID = UUID()
         scheduleExpiry()
@@ -761,7 +778,7 @@ final class PerkyModel: ObservableObject {
             ? "合盖 helper：检测到系统设置冲突，需要你选择恢复或保留。"
             : (lidPowerHelper.isEnabled ? "合盖 helper：已获准运行。" : "合盖 helper：尚未获准运行。")
         let lidStatus = isLidModeActive
-            ? "合盖模式：已启用，SleepDisabled 将由 helper 按期限恢复。"
+            ? "合盖模式：已启用，helper 会按期限恢复合盖策略。"
             : "合盖模式：\(lidReadinessMessage)"
         let brightnessStatus = brightnessController.isAvailable
             ? "内建屏幕亮度：接口可用（macOS 26 使用非公开 DisplayServices 接口）。"
@@ -1133,7 +1150,7 @@ final class PerkyModel: ObservableObject {
         if isLidModeActive {
             if snapshot.isLidClosed == true {
                 if snapshot.clamshellWillSleep == true {
-                    lidModeStatusMessage = "已设置 SleepDisabled；系统仍报告合盖可能触发睡眠，实际行为取决于机型和 macOS。"
+                    lidModeStatusMessage = "macOS 仍报告合盖会触发睡眠；请开盖检查，Perky 无法确认本机合盖运行已生效。"
                 }
                 if brightnessAutomationEnabled { applyClosedLidBrightness() }
             } else if snapshot.isLidClosed == false {

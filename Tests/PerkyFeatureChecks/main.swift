@@ -62,7 +62,11 @@ private enum PerkyFeatureChecks {
     private static func checkClamshellReadiness() throws {
         let ready = snapshot(sensor: true, externalDisplay: true, acPower: true)
         try expect(ready.canUseAppleClamshellMode, "sensor, external display and AC power should be required")
-        try expectEqual(ready.readinessMessage, "电源与外接显示器已就绪。", "ready-state message")
+        try expectEqual(
+            ready.readinessMessage,
+            "已接电源并检测到外接显示器；还需连接外接键盘和鼠标或触控板。",
+            "ready-state message"
+        )
 
         let noSensor = snapshot(sensor: false, externalDisplay: true, acPower: true)
         try expect(!noSensor.canUseAppleClamshellMode, "clamshell mode must reject a missing lid sensor")
@@ -70,11 +74,19 @@ private enum PerkyFeatureChecks {
 
         let noDisplay = snapshot(sensor: true, externalDisplay: false, acPower: true)
         try expect(!noDisplay.canUseAppleClamshellMode, "clamshell mode must reject a missing external display")
-        try expectEqual(noDisplay.readinessMessage, "未检测到外接显示器。", "missing display message")
+        try expectEqual(
+            noDisplay.readinessMessage,
+            "未检测到外接显示器 · 将尝试软件合盖策略；此路径需按机型验证。",
+            "missing display message"
+        )
 
         let onBattery = snapshot(sensor: true, externalDisplay: true, acPower: false)
         try expect(!onBattery.canUseAppleClamshellMode, "clamshell mode must reject AC disconnection")
-        try expectEqual(onBattery.readinessMessage, "电池供电 · 低电量时自动停止。", "battery message")
+        try expectEqual(
+            onBattery.readinessMessage,
+            "电池供电 · 低电量或热压力过高时自动停止；Apple 原生合盖桌面模式需接电源。",
+            "battery message"
+        )
     }
 
     private static func checkBatterySafetyPolicy() throws {

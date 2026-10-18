@@ -59,7 +59,7 @@ struct PerkyPanelView: View {
             Button("继续设置") { model.confirmLidModeSetup() }
             Button("取消", role: .cancel) { model.cancelLidModeSetup() }
         } message: {
-            Text("合盖模式会临时修改整台 Mac 的睡眠设置，并在停止或到期时恢复。实际效果取决于机型；使用电池时会在低电量时停止。")
+            Text("Perky 会先尝试合盖睡眠控制；无法确认时可能回退为影响整台 Mac 的全局防睡眠设置。停止、到期、低电量或过热时会恢复。无外接屏幕的效果因机型和 macOS 而异；Apple 支持的合盖桌面模式需外接显示器、输入设备和电源。")
         }
         .confirmationDialog(
             "在电池供电下继续？",
@@ -117,7 +117,7 @@ struct PerkyPanelView: View {
     private var stateTitle: String {
         if model.isStarting { return "正在启动" }
         if model.isStopping { return "正在停止" }
-        if model.isRunning { return "保持唤醒中" }
+        if model.isRunning { return model.isLidModeActive ? "合盖运行中" : "保持唤醒中" }
         return "未运行"
     }
 
@@ -139,9 +139,11 @@ struct PerkyPanelView: View {
             if model.isLidModeEnabled && !model.helperIsEnabled {
                 HStack(spacing: 7) {
                     Label(
-                        model.helperNeedsApproval && model.helperCanRegister
-                            ? "等待系统批准"
-                            : (model.helperCanRegister ? "需要系统授权" : "当前版本无法批准"),
+                        model.helperUsesLocalAdminInstall
+                            ? "本机 helper 未运行"
+                            : (model.helperNeedsApproval && model.helperCanRegister
+                                ? "等待系统批准"
+                                : (model.helperCanRegister ? "需要系统授权" : "当前版本无法批准")),
                         systemImage: "exclamationmark.circle"
                     )
                     .help(model.helperStatusMessage)
@@ -149,7 +151,10 @@ struct PerkyPanelView: View {
 
                     Spacer(minLength: 4)
 
-                    if model.helperNeedsApproval && model.helperCanRegister {
+                    if model.helperUsesLocalAdminInstall {
+                        Button("重新检查") { model.recheckHelperRecoveryStatus() }
+                            .buttonStyle(.borderless)
+                    } else if model.helperNeedsApproval && model.helperCanRegister {
                         Button("打开设置") { model.openLidHelperSettings() }
                             .buttonStyle(.borderless)
                         Button("重新检查") { model.recheckHelperRecoveryStatus() }
@@ -165,7 +170,7 @@ struct PerkyPanelView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-                if !model.helperCanRegister {
+                if !model.helperCanRegister && !model.helperUsesLocalAdminInstall {
                     Text("需 Apple 信任签名后，Perky 才会出现在批准列表中。")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
@@ -176,13 +181,18 @@ struct PerkyPanelView: View {
             Button {
                 model.start()
             } label: {
-                Label("开始保持唤醒", systemImage: "sun.max")
+                Label(
+                    model.isLidModeEnabled ? "开始合盖运行" : "开始保持唤醒",
+                    systemImage: model.isLidModeEnabled ? "laptopcomputer.and.arrow.down" : "sun.max"
+                )
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
             .keyboardShortcut(.defaultAction)
             .disabled(model.selectedDuration == nil || model.isStarting || model.isStopping)
-            .accessibilityHint("普通模式仅防止空闲睡眠；合盖模式按你的设置运行")
+            .accessibilityHint(model.isLidModeEnabled
+                ? "开始限时合盖运行；系统报告状态不代表已经通过合盖实测"
+                : "普通模式只防止空闲睡眠，不阻止合盖睡眠")
         }
     }
 
@@ -277,7 +287,7 @@ struct PerkyPanelView: View {
             Label("合盖运行", systemImage: "laptopcomputer.and.arrow.down")
         }
         .toggleStyle(.switch)
-        .accessibilityHint("开启后需允许恢复助手；系统睡眠设置会在停止或到期时恢复")
+        .accessibilityHint("开启合盖运行；可能使用全局防睡眠回退，并在停止或到期时恢复")
     }
 
     private var options: some View {
@@ -511,6 +521,9 @@ struct PerkyPanelView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 if model.isStopping {
                     Button("重试停止") { model.retryStop() }
+                        .buttonStyle(.borderless)
+                } else if model.helperUsesLocalAdminInstall {
+                    Button("重新检查恢复助手") { model.recheckHelperRecoveryStatus() }
                         .buttonStyle(.borderless)
                 } else if model.helperNeedsApproval && model.helperCanRegister {
                     HStack(spacing: 10) {

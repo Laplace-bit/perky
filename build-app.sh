@@ -59,8 +59,8 @@ if [ -n "${PERKY_CODESIGN_IDENTITY:-}" ]; then
     codesign --force --options runtime --timestamp \
         --sign "$PERKY_CODESIGN_IDENTITY" "$STAGING_APP"
 else
-    printf '%s\n' "Warning: this ad-hoc build supports basic mode, but macOS cannot approve its privileged lid helper." >&2
-    printf '%s\n' "Set PERKY_CODESIGN_IDENTITY to an Apple-trusted signing identity to enable helper registration." >&2
+	printf '%s\n' "Warning: this ad-hoc app bundle cannot register its helper through Login Items." >&2
+	printf '%s\n' "Use package-local-installer.sh to create a local admin-authorized installer for lid mode." >&2
     codesign --force --sign - \
         --identifier com.perky.app.lid-helper "$MACOS_DIR/PerkyLidHelper"
     codesign --force --sign - "$STAGING_APP"

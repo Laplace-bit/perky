@@ -19,8 +19,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build app and run feature checks
         run: ./build-app.sh
-      - name: Create installable packages
-        run: ./package-dmg.sh .build/Perky.app "" .build/packages
+      - name: Create local admin installer
+        run: ./package-local-installer.sh .build/Perky.app "" .build/packages
       - uses: actions/upload-artifact@v4
         with:
           name: perky-${{ github.sha }}-arm64

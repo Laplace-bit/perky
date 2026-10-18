@@ -44,12 +44,12 @@ public struct LidModeSnapshot: Equatable {
             return "无法读取合盖状态。"
         }
         if !isOnACPower {
-            return "电池供电 · 低电量时自动停止。"
+            return "电池供电 · 低电量或热压力过高时自动停止；Apple 原生合盖桌面模式需接电源。"
         }
         if !hasExternalDisplay {
-            return "未检测到外接显示器。"
+            return "未检测到外接显示器 · 将尝试软件合盖策略；此路径需按机型验证。"
         }
-        return "电源与外接显示器已就绪。"
+        return "已接电源并检测到外接显示器；还需连接外接键盘和鼠标或触控板。"
     }
 
     public static func current() -> LidModeSnapshot {

@@ -1,18 +1,25 @@
 import Foundation
 import PerkyHelperShared
 import Darwin
+import IOKit
+import IOKit.pwr_mgt
 import IOKit.ps
 import Security
 
 private let helperMachServiceName = "com.perky.app.lid-helper"
 private let pmsetPath = "/usr/bin/pmset"
 private let powerPreferencesPath = "/Library/Preferences/com.apple.PowerManagement.plist"
+private let localAdminInstallArgument = "--perky-local-admin-install"
+private let localAppExecutablePath = "/Applications/Perky.app/Contents/MacOS/Perky"
+private let localHelperExecutablePath = "/Library/PrivilegedHelperTools/com.perky.app.lid-helper"
+private let localInstallStatePath = "/Library/Application Support/Perky/local-install.plist"
 
 @main
 enum PerkyLidHelperMain {
     static func main() {
         let delegate = LidPowerHelperListenerDelegate()
         let listener = NSXPCListener(machServiceName: helperMachServiceName)
+        listener.setConnectionCodeSigningRequirement("identifier \"com.perky.app\"")
         listener.delegate = delegate
         delegate.listener = listener
         delegate.recoveryManager.reconcileAfterLaunch()
@@ -39,6 +46,54 @@ private final class LidPowerHelperListenerDelegate: NSObject, NSXPCListenerDeleg
 private func isAuthorizedPerkyClient(_ connection: NSXPCConnection) -> Bool {
     guard connection.effectiveUserIdentifier != 0,
           connection.processIdentifier > 0 else { return false }
+
+    if isInstalledLocalAdminHelper {
+        return isAuthorizedLocalInstallClient(connection)
+    }
+
+    return isAuthorizedAppleSignedClient(connection)
+}
+
+private var isInstalledLocalAdminHelper: Bool {
+    guard geteuid() == 0,
+          CommandLine.arguments.contains(localAdminInstallArgument),
+          let code = currentProcessCode(),
+          SecCodeCheckValidity(code, SecCSFlags(), nil) == errSecSuccess,
+          codeSigningIdentifier(for: code) == "com.perky.app.lid-helper",
+          mainExecutablePath(for: code) == localHelperExecutablePath,
+          rootOwnsProtectedPath(localHelperExecutablePath) else { return false }
+    return true
+}
+
+private func isAuthorizedLocalInstallClient(_ connection: NSXPCConnection) -> Bool {
+    guard connection.effectiveUserIdentifier == localInstallAuthorizedUserID else { return false }
+    let attributes: [CFString: Any] = [
+        kSecGuestAttributePid: NSNumber(value: connection.processIdentifier)
+    ]
+    var guestCode: SecCode?
+    guard SecCodeCopyGuestWithAttributes(
+        nil,
+        attributes as CFDictionary,
+        SecCSFlags(),
+        &guestCode
+    ) == errSecSuccess,
+    let guestCode,
+    SecCodeCheckValidity(guestCode, SecCSFlags(), nil) == errSecSuccess,
+    codeSigningIdentifier(for: guestCode) == "com.perky.app",
+    mainExecutablePath(for: guestCode) == localAppExecutablePath,
+    rootOwnsProtectedPath(localAppExecutablePath) else { return false }
+    return true
+}
+
+private var localInstallAuthorizedUserID: uid_t? {
+    guard rootOwnsProtectedPath(localInstallStatePath),
+          let state = NSDictionary(contentsOfFile: localInstallStatePath),
+          let userID = state["AuthorizedUserID"] as? NSNumber,
+          userID.intValue > 0 else { return nil }
+    return uid_t(userID.intValue)
+}
+
+private func isAuthorizedAppleSignedClient(_ connection: NSXPCConnection) -> Bool {
 
     var helperCode: SecCode?
     guard SecCodeCopySelf(SecCSFlags(), &helperCode) == errSecSuccess,
@@ -70,6 +125,73 @@ private func isAuthorizedPerkyClient(_ connection: NSXPCConnection) -> Bool {
     let requirement else { return false }
 
     return SecCodeCheckValidity(guestCode, SecCSFlags(), requirement) == errSecSuccess
+}
+
+private func currentProcessCode() -> SecCode? {
+    var code: SecCode?
+    guard SecCodeCopySelf(SecCSFlags(), &code) == errSecSuccess else { return nil }
+    return code
+}
+
+private func codeSigningIdentifier(for code: SecCode) -> String? {
+    var staticCode: SecStaticCode?
+    guard SecCodeCopyStaticCode(code, SecCSFlags(), &staticCode) == errSecSuccess,
+          let staticCode else { return nil }
+
+    var information: CFDictionary?
+    guard SecCodeCopySigningInformation(
+        staticCode,
+        SecCSFlags(rawValue: kSecCSSigningInformation),
+        &information
+    ) == errSecSuccess,
+    let information,
+    let dictionary = information as? [String: Any] else { return nil }
+    return dictionary[kSecCodeInfoIdentifier as String] as? String
+}
+
+private func mainExecutablePath(for code: SecCode) -> String? {
+    var staticCode: SecStaticCode?
+    guard SecCodeCopyStaticCode(code, SecCSFlags(), &staticCode) == errSecSuccess,
+          let staticCode else { return nil }
+
+    var information: CFDictionary?
+    guard SecCodeCopySigningInformation(
+        staticCode,
+        SecCSFlags(rawValue: kSecCSSigningInformation),
+        &information
+    ) == errSecSuccess,
+    let information,
+    let dictionary = information as? [String: Any],
+    let executableURL = dictionary[kSecCodeInfoMainExecutable as String] as? URL else { return nil }
+    return executableURL.standardizedFileURL.path
+}
+
+private func rootOwnsProtectedPath(_ path: String) -> Bool {
+    guard path.hasPrefix("/") else { return false }
+    var currentPath = ""
+    let components = path.split(separator: "/")
+    guard !components.isEmpty else { return false }
+
+    for (index, component) in components.enumerated() {
+        currentPath += "/\(component)"
+        var metadata = stat()
+        guard currentPath.withCString({ lstat($0, &metadata) }) == 0,
+              metadata.st_uid == 0,
+              metadata.st_mode & mode_t(S_IWOTH) == 0 else { return false }
+
+        let isFinalComponent = index == components.count - 1
+        let isDirectory = metadata.st_mode & mode_t(S_IFMT) == mode_t(S_IFDIR)
+        let isRegularFile = metadata.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG)
+        guard (isFinalComponent && isRegularFile) || (!isFinalComponent && isDirectory) else { return false }
+
+        if metadata.st_mode & mode_t(S_IWGRP) != 0 {
+            // On this Mac /Applications is root:admin and group-writable. Only
+            // permit that trusted system directory; the app and executable
+            // themselves must remain root-owned and not group-writable.
+            guard currentPath == "/Applications", metadata.st_gid == 80 else { return false }
+        }
+    }
+    return true
 }
 
 private func isAppleTrusted(_ code: SecCode) -> Bool {
@@ -110,6 +232,12 @@ private final class LidPowerRecoveryManager: NSObject, LidPowerHelperProtocol {
         case conflict
     }
 
+    private enum Mechanism: String, Codable {
+        case pmsetSleepDisabled
+        case clamshellSleepState
+        case preexistingClamshellPolicy
+    }
+
     private struct RecoveryRecord: Codable {
         var identifier: String
         var deadline: Date
@@ -117,6 +245,7 @@ private final class LidPowerRecoveryManager: NSObject, LidPowerHelperProtocol {
         var originalSleepDisabled: Bool
         var ownsSleepDisabled: Bool
         var phase: Phase
+        var mechanism: Mechanism? = nil
         var fingerprintBeforeWrite: String?
         var fingerprintAfterWrite: String?
         var message: String?
@@ -141,6 +270,21 @@ private final class LidPowerRecoveryManager: NSObject, LidPowerHelperProtocol {
         guard var record = currentRecord else { return }
         switch record.phase {
         case .applying:
+            if record.mechanism == .clamshellSleepState {
+                guard restoreClamshellSleepPolicy() else {
+                    record.phase = .conflict
+                    record.message = "恢复助手在应用合盖策略时中断，macOS 未确认已恢复默认合盖睡眠；请重新打开 Perky 处理。"
+                    if !save(record) { currentRecord = record }
+                    return
+                }
+                guard removeRecord() else {
+                    record.phase = .conflict
+                    record.message = "默认合盖睡眠已恢复，但无法删除系统恢复记录；请重新打开 Perky 清理记录。"
+                    if !save(record) { currentRecord = record }
+                    return
+                }
+                return
+            }
             record.phase = .conflict
             record.message = "Perky 在应用系统电源设置时中断；设置归属无法确认。请选择保留当前值或恢复启用前的值。"
             if !save(record) {
@@ -203,12 +347,8 @@ private final class LidPowerRecoveryManager: NSObject, LidPowerHelperProtocol {
             return
         }
 
-        guard let originalValue = currentSleepDisabled() else {
-            reply(false, "无法通过 pmset 读取当前 SleepDisabled 状态；未修改系统设置。")
-            return
-        }
-
-        if originalValue {
+        let originalValue = currentSleepDisabled()
+        if originalValue == true {
             let record = RecoveryRecord(
                 identifier: identifier,
                 deadline: deadline,
@@ -229,6 +369,89 @@ private final class LidPowerRecoveryManager: NSObject, LidPowerHelperProtocol {
             return
         }
 
+        if currentClamshellCausesSleep() == false {
+            let record = RecoveryRecord(
+                identifier: identifier,
+                deadline: deadline,
+                batteryThresholdPercent: batteryThresholdPercent,
+                originalSleepDisabled: originalValue ?? false,
+                ownsSleepDisabled: false,
+                phase: .active,
+                mechanism: .preexistingClamshellPolicy,
+                fingerprintBeforeWrite: nil,
+                fingerprintAfterWrite: nil,
+                message: "macOS 已报告合盖不会触发睡眠；Perky 保留现有策略，没有更改系统电源设置。"
+            )
+            guard save(record) else {
+                reply(false, "无法持久保存恢复期限；Perky 保留了现有合盖策略，没有更改系统设置。")
+                return
+            }
+            scheduleExpiry(for: record)
+            reply(true, record.message)
+            return
+        }
+
+        if currentClamshellCausesSleep() == true {
+            var record = RecoveryRecord(
+                identifier: identifier,
+                deadline: deadline,
+                batteryThresholdPercent: batteryThresholdPercent,
+                originalSleepDisabled: originalValue ?? false,
+                ownsSleepDisabled: false,
+                phase: .applying,
+                mechanism: .clamshellSleepState,
+                fingerprintBeforeWrite: nil,
+                fingerprintAfterWrite: nil,
+                message: nil
+            )
+            guard save(record) else {
+                reply(false, "无法持久保存合盖策略恢复期限；Perky 没有修改系统合盖行为。")
+                return
+            }
+
+            let applyStatus = setClamshellSleepDisabled(true)
+            if applyStatus == kIOReturnSuccess,
+               currentClamshellCausesSleep() == false {
+                record.phase = .active
+                record.message = "macOS 当前报告合盖不会触发睡眠；Perky 会在停止、到期或热压力过高时恢复默认策略。"
+                guard save(record) else {
+                    record.phase = .conflict
+                    record.message = "合盖策略已启用，但恢复期限未能持久保存；Perky 正尝试恢复默认策略。"
+                    currentRecord = record
+                    let restored = restoreIfStillOwned(record)
+                    reply(false, restored.0
+                        ? "恢复期限保存失败；默认合盖策略已恢复，合盖模式未开启。"
+                        : (restored.1 ?? record.message))
+                    return
+                }
+                scheduleExpiry(for: record)
+                reply(true, record.message)
+                return
+            }
+
+            guard restoreClamshellSleepPolicy() else {
+                record.phase = .conflict
+                record.message = "macOS 未确认合盖策略已启用或恢复；Perky 保留恢复记录，不会继续修改其他睡眠设置。"
+                _ = save(record)
+                currentRecord = record
+                reply(false, record.message)
+                return
+            }
+            guard removeRecord() else {
+                record.phase = .conflict
+                record.message = "合盖策略未启用，且无法清理恢复记录；请重新打开 Perky 处理。"
+                _ = save(record)
+                currentRecord = record
+                reply(false, record.message)
+                return
+            }
+        }
+
+        guard originalValue == false else {
+            reply(false, "无法通过 pmset 确认当前系统睡眠设置；Perky 未修改系统设置。")
+            return
+        }
+
         guard let beforeFingerprint = powerPreferencesFingerprint() else {
             reply(false, "无法记录系统电源设置的所有权信息；为避免无法安全恢复，未修改系统设置。")
             return
@@ -241,6 +464,7 @@ private final class LidPowerRecoveryManager: NSObject, LidPowerHelperProtocol {
             originalSleepDisabled: false,
             ownsSleepDisabled: true,
             phase: .applying,
+            mechanism: .pmsetSleepDisabled,
             fingerprintBeforeWrite: beforeFingerprint,
             fingerprintAfterWrite: nil,
             message: nil
@@ -340,6 +564,29 @@ private final class LidPowerRecoveryManager: NSObject, LidPowerHelperProtocol {
         }
 
         if restoreOriginal {
+            if record.mechanism == .preexistingClamshellPolicy {
+                guard removeRecord() else {
+                    reply(false, "Perky 保留的原有合盖策略未被修改，但无法清除恢复记录；请重试清理。")
+                    return
+                }
+                reply(true, "已保留启动前的合盖策略，并清除恢复记录。")
+                return
+            }
+            if record.mechanism == .clamshellSleepState {
+                guard restoreClamshellSleepPolicy() else {
+                    reply(false, "macOS 未确认默认合盖策略已恢复；Perky 会保留恢复记录并允许重试。")
+                    return
+                }
+                guard removeRecord() else {
+                    var retained = record
+                    retained.message = "默认合盖策略已恢复，但无法删除恢复记录；请重试清理。"
+                    if !save(retained) { currentRecord = retained }
+                    reply(false, retained.message)
+                    return
+                }
+                reply(true, "已恢复 macOS 默认合盖睡眠策略。")
+                return
+            }
             guard runPMSet(["-a", "disablesleep", record.originalSleepDisabled ? "1" : "0"]).success,
                   currentSleepDisabled() == record.originalSleepDisabled else {
                 reply(false, "macOS 未确认系统设置已恢复；Perky 会保留此恢复记录并允许重试。")
@@ -399,6 +646,24 @@ private final class LidPowerRecoveryManager: NSObject, LidPowerHelperProtocol {
     }
 
     private func restoreIfStillOwned(_ record: RecoveryRecord) -> (Bool, String?) {
+        if record.mechanism == .clamshellSleepState {
+            guard restoreClamshellSleepPolicy() else {
+                let updated = scheduleImmediateRestoreRetry(
+                    for: record,
+                    message: "macOS 暂未确认默认合盖策略已恢复；独立 helper 会继续重试。"
+                )
+                return (false, updated.message)
+            }
+            guard removeRecord() else {
+                let updated = scheduleImmediateRestoreRetry(
+                    for: record,
+                    message: "默认合盖策略已恢复，但无法清除恢复记录；独立 helper 会继续重试。"
+                )
+                return (false, updated.message)
+            }
+            return (true, "已恢复 macOS 默认合盖睡眠策略。")
+        }
+
         guard record.ownsSleepDisabled else {
             guard removeRecord() else {
                 let updated = scheduleImmediateRestoreRetry(
@@ -514,7 +779,7 @@ private final class LidPowerRecoveryManager: NSObject, LidPowerHelperProtocol {
 
     private func processActiveSession(_ record: RecoveryRecord) {
         guard record.phase == .active else { return }
-        if let failure = batterySafetyFailure(thresholdPercent: record.batteryThresholdPercent ?? 15) {
+        if let failure = safetyFailure(thresholdPercent: record.batteryThresholdPercent ?? 15) {
             var stopping = record
             stopping.deadline = Date()
             stopping.message = failure
@@ -526,8 +791,28 @@ private final class LidPowerRecoveryManager: NSObject, LidPowerHelperProtocol {
             _ = restoreIfStillOwned(record)
             return
         }
+        if record.mechanism == .clamshellSleepState,
+           currentClamshellCausesSleep() == true {
+            markConflict(
+                record,
+                message: "macOS 又报告合盖会触发睡眠。Perky 已停止自动修改这个全局实验性状态；请开盖并处理恢复提示。"
+            )
+            return
+        }
         if expiryTimer == nil {
             scheduleExpiry(for: record)
+        }
+    }
+
+    private func safetyFailure(thresholdPercent: Int) -> String? {
+        if let batteryFailure = batterySafetyFailure(thresholdPercent: thresholdPercent) {
+            return batteryFailure
+        }
+        switch ProcessInfo.processInfo.thermalState {
+        case .serious, .critical:
+            return "Mac 的热压力已达到严重级别；Perky 已恢复默认合盖睡眠策略。"
+        default:
+            return nil
         }
     }
 
@@ -590,6 +875,59 @@ private final class LidPowerRecoveryManager: NSObject, LidPowerHelperProtocol {
             if value == "0" || value.lowercased() == "no" { return false }
         }
         return nil
+    }
+
+    private func currentClamshellCausesSleep() -> Bool? {
+        let rootDomain = IOServiceGetMatchingService(
+            kIOMainPortDefault,
+            IOServiceMatching("IOPMrootDomain")
+        )
+        guard rootDomain != IO_OBJECT_NULL else { return nil }
+        defer { IOObjectRelease(rootDomain) }
+
+        guard let value = IORegistryEntryCreateCFProperty(
+            rootDomain,
+            "AppleClamshellCausesSleep" as CFString,
+            kCFAllocatorDefault,
+            0
+        )?.takeRetainedValue() as? NSNumber else {
+            return nil
+        }
+        return value.boolValue
+    }
+
+    private func restoreClamshellSleepPolicy() -> Bool {
+        if currentClamshellCausesSleep() == true { return true }
+        guard setClamshellSleepDisabled(false) == kIOReturnSuccess else { return false }
+        return currentClamshellCausesSleep() == true
+    }
+
+    private func setClamshellSleepDisabled(_ disabled: Bool) -> IOReturn {
+        let rootDomain = IOServiceGetMatchingService(
+            kIOMainPortDefault,
+            IOServiceMatching("IOPMrootDomain")
+        )
+        guard rootDomain != IO_OBJECT_NULL else { return kIOReturnNotFound }
+        defer { IOObjectRelease(rootDomain) }
+
+        var connection: io_connect_t = IO_OBJECT_NULL
+        let openStatus = IOServiceOpen(rootDomain, mach_task_self_, 0, &connection)
+        guard openStatus == kIOReturnSuccess else { return openStatus }
+        defer { IOServiceClose(connection) }
+
+        var value: UInt64 = disabled ? 1 : 0
+        return IOConnectCallMethod(
+            connection,
+            UInt32(kPMSetClamshellSleepState),
+            &value,
+            1,
+            nil,
+            0,
+            nil,
+            nil,
+            nil,
+            nil
+        )
     }
 
     private func runPMSet(_ arguments: [String]) -> (success: Bool, output: String) {
