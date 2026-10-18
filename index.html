@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f2f3ec" />
+    <meta name="robots" content="index,follow,max-image-preview:large" />
+    <title>Perky：Mac 定时防睡眠工具与合盖运行说明</title>
+    <meta
+      name="description"
+      content="Perky 是面向 macOS 14+ 的原生菜单栏工具，可定时阻止 Mac 因空闲而睡眠。查看合盖运行限制、授权条件，以及 RedmiBook 等 Windows 笔记本的兼容性声明。"
+    />
+    <link rel="canonical" href="https://laplace-bit.github.io/perky/" />
+    <link rel="stylesheet" href="styles.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='19' fill='%231d3d31'/%3E%3Cpath d='M19 44V21h8v4c2-3 5-5 10-5 8 0 13 5 13 13s-5 13-13 13c-4 0-7-1-10-4v2h-8Zm17-5c4 0 7-3 7-7s-3-7-7-7-7 3-7 7 3 7 7 7Z' fill='%23e7f0e8'/%3E%3C/svg%3E"
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="zh_CN" />
+    <meta property="og:site_name" content="Perky" />
+    <meta property="og:title" content="Perky：Mac 定时防睡眠工具与合盖运行说明" />
+    <meta
+      property="og:description"
+      content="为下载、构建和远程任务定时保持 Mac 唤醒。了解 macOS 支持范围、合盖模式条件和品牌兼容性声明。"
+    />
+    <meta property="og:url" content="https://laplace-bit.github.io/perky/" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Perky：Mac 定时防睡眠工具" />
+    <meta
+      name="twitter:description"
+      content="面向 macOS 14+ 的原生菜单栏防睡眠工具。合盖运行按机型和系统条件判断。"
+    />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "Perky",
+        "url": "https://laplace-bit.github.io/perky/",
+        "inLanguage": "zh-CN"
+      }
+    </script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳到主要内容</a>
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="Perky 首页">
+        <span class="brand-mark" aria-hidden="true">p</span>
+        <span>perky<span class="brand-period">.</span></span>
+      </a>
+      <nav aria-label="主导航">
+        <a href="#how-it-works">工作方式</a>
+        <a href="#compatibility">兼容范围</a>
+        <a href="#faq">常见问题</a>
+      </nav>
+      <a class="header-link" href="https://github.com/Laplace-bit/perky">查看源码 <span aria-hidden="true">↗</span></a>
+    </header>
+
+    <main id="main">
+      <section class="hero shell" id="top" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="eyebrow"><span class="eyebrow-dot"></span> 原生 macOS 菜单栏工具</p>
+          <h1 id="hero-title">让长任务继续，<br /><em>让睡眠有时限。</em></h1>
+          <p class="hero-intro">
+            Perky 帮你在下载、构建、演示或远程连接期间，按时保持 Mac 唤醒。倒计时结束后，自动停止 Perky 管理的保持唤醒状态。
+          </p>
+          <div class="hero-actions">
+            <a class="button button-dark" href="https://github.com/Laplace-bit/perky">
+              查看源码与构建方式 <span aria-hidden="true">↗</span>
+            </a>
+            <a class="text-link" href="#compatibility">查看兼容范围 <span aria-hidden="true">↓</span></a>
+          </div>
+          <p class="hero-note">适用于运行 macOS 14 或更新版本的 Mac</p>
+        </div>
+
+        <div class="product-scene" aria-label="Perky 菜单栏面板示意图">
+          <div class="scene-orbit orbit-one"></div>
+          <div class="scene-orbit orbit-two"></div>
+          <div class="menu-panel">
+            <div class="panel-topline">
+              <span class="panel-brand"><span class="mini-mark">p</span> Perky</span>
+              <span class="panel-state"><i></i> 运行中</span>
+            </div>
+            <p class="panel-caption">保持唤醒 · 普通模式</p>
+            <p class="panel-timer">24<span>:</span>59</p>
+            <div class="panel-meter"><span></span></div>
+            <div class="panel-footer">
+              <span>结束后恢复</span>
+              <span class="panel-chip">延长 15 分钟</span>
+            </div>
+          </div>
+          <div class="scene-label label-left"><span class="label-number">01</span><span>设定时长</span></div>
+          <div class="scene-label label-right"><span class="label-number">02</span><span>随时停止</span></div>
+          <span class="scene-spark spark-a" aria-hidden="true">✳</span>
+          <span class="scene-spark spark-b" aria-hidden="true">·</span>
+        </div>
+      </section>
+
+      <section class="fact-strip" aria-label="产品摘要">
+        <div class="shell fact-grid">
+          <p><span class="fact-kicker">平台</span><strong>macOS 14+</strong></p>
+          <p><span class="fact-kicker">基础模式</span><strong>无需管理员权限</strong></p>
+          <p><span class="fact-kicker">计时</span><strong>1–1440 分钟</strong></p>
+          <p><span class="fact-kicker">控制方式</span><strong>菜单栏 · 一键停止</strong></p>
+        </div>
+      </section>
+
+      <section class="section shell" id="how-it-works" aria-labelledby="how-title">
+        <div class="section-heading">
+          <p class="eyebrow">01 / 简单、限时、可确认</p>
+          <h2 id="how-title">让 Mac 专注于正在做的事。</h2>
+          <p>Perky 的基础模式只处理一件事：阻止系统因空闲而自动睡眠。屏幕仍按你的 macOS 显示器设置关闭。</p>
+        </div>
+        <div class="steps-grid">
+          <article class="step-card">
+            <span class="step-index">01</span>
+            <h3>选择一个时长</h3>
+            <p>从 15、30、60 分钟快捷选项开始，也可以设置 1 到 1440 分钟的自定义计时。</p>
+          </article>
+          <article class="step-card">
+            <span class="step-index">02</span>
+            <h3>查看当前状态</h3>
+            <p>菜单栏面板展示运行状态与剩余时间。计时基于截止时间，面板关闭后也会继续。</p>
+          </article>
+          <article class="step-card">
+            <span class="step-index">03</span>
+            <h3>到时自动结束</h3>
+            <p>可以提前停止或延长。到期后 Perky 释放自己的保持唤醒断言，让 Mac 恢复原有睡眠行为。</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="mode-section" aria-labelledby="mode-title">
+        <div class="shell mode-layout">
+          <div class="section-heading mode-heading">
+            <p class="eyebrow">02 / 两种模式，边界清楚</p>
+            <h2 id="mode-title">只用你需要的那一种。</h2>
+            <p>基础防空闲睡眠不等于合盖运行。需要合盖时，再单独查看授权与设备条件。</p>
+          </div>
+          <div class="mode-list">
+            <article class="mode-row">
+              <div class="mode-symbol symbol-basic" aria-hidden="true">◷</div>
+              <div>
+                <div class="mode-title-line"><h3>定时保持唤醒</h3><span class="mode-tag">基础模式</span></div>
+                <p>使用 macOS 电源断言阻止空闲系统睡眠，不修改合盖设置，不强制保持屏幕点亮。</p>
+              </div>
+              <span class="row-arrow" aria-hidden="true">↗</span>
+            </article>
+            <article class="mode-row">
+              <div class="mode-symbol symbol-lid" aria-hidden="true">⌑</div>
+              <div>
+                <div class="mode-title-line"><h3>合盖继续运行</h3><span class="mode-tag mode-tag-outline">可选 · 需授权</span></div>
+                <p>由限时恢复 helper 管理系统级电源设置。机型、macOS、电源和外接设备会影响结果，不能保证每台 Mac 都可用。</p>
+              </div>
+              <span class="row-arrow" aria-hidden="true">↗</span>
+            </article>
+            <article class="mode-row">
+              <div class="mode-symbol symbol-brightness" aria-hidden="true">☼</div>
+              <div>
+                <div class="mode-title-line"><h3>内建屏幕亮度辅助</h3><span class="mode-tag mode-tag-outline">实验性</span></div>
+                <p>目前只在 macOS 26.x 验证，仅控制内建屏幕，依赖非公开系统接口；外接显示器不受控制。</p>
+              </div>
+              <span class="row-arrow" aria-hidden="true">↗</span>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section shell compatibility-section" id="compatibility" aria-labelledby="compatibility-title">
+        <div class="section-heading">
+          <p class="eyebrow">03 / 先看设备与系统</p>
+          <h2 id="compatibility-title">Perky 适用于 Mac，不是 Windows 笔记本工具。</h2>
+          <p>当前版本是原生 macOS 应用。基础模式与合盖模式有不同要求，请按实际运行的操作系统判断。</p>
+        </div>
+        <div class="compat-table" role="table" aria-label="Perky 设备兼容性">
+          <div class="compat-row compat-head" role="row">
+            <span role="columnheader">设备或系统</span><span role="columnheader">当前支持情况</span>
+          </div>
+          <div class="compat-row" role="row">
+            <span role="cell">运行 macOS 14+ 的 Mac</span><span role="cell"><b class="status-dot status-green"></b>基础定时保持唤醒</span>
+          </div>
+          <div class="compat-row" role="row">
+            <span role="cell">Mac 合盖运行</span><span role="cell"><b class="status-dot status-amber"></b>需恢复 helper；行为因环境而异</span>
+          </div>
+          <div class="compat-row" role="row">
+            <span role="cell">RedmiBook、Redmi / Xiaomi 笔记本</span><span role="cell"><b class="status-dot status-gray"></b>Windows 版本不支持</span>
+          </div>
+          <div class="compat-row" role="row">
+            <span role="cell">华为 MateBook、ThinkPad 等 Windows PC</span><span role="cell"><b class="status-dot status-gray"></b>当前版本不支持</span>
+          </div>
+        </div>
+        <p class="compat-note"><strong>关于合盖模式：</strong>首次使用需要 Apple 信任签名及在 macOS 系统设置中批准恢复 helper。接入电源、外接显示器、低电量保护和具体机型都会影响合盖后的行为；Perky 会在无法确认时显示限制，不承诺所有机型均能合盖运行。</p>
+      </section>
+
+      <section class="faq-section" id="faq" aria-labelledby="faq-title">
+        <div class="shell faq-layout">
+          <div class="section-heading faq-heading">
+            <p class="eyebrow">04 / 常见问题</p>
+            <h2 id="faq-title">开始前，先弄清楚这些。</h2>
+          </div>
+          <div class="faq-list">
+            <details>
+              <summary>Perky 支持 RedmiBook 或 Redmi 笔记本吗？</summary>
+              <p>不支持。Perky 当前是原生 macOS 应用，面向运行 macOS 14 或更新版本的 Mac；运行 Windows 的 RedmiBook、小米笔记本及其他 Windows PC 不能运行此版本。</p>
+            </details>
+            <details>
+              <summary>所有 MacBook 合盖后都能继续运行吗？</summary>
+              <p>不能保证。合盖模式需要单独授权恢复 helper，且实际效果与机型、macOS 版本、供电及外接设备有关。请以应用内的兼容性检查和系统状态为准。</p>
+            </details>
+            <details>
+              <summary>基础模式会让屏幕一直亮着吗？</summary>
+              <p>不会。基础模式只阻止系统因空闲而睡眠，显示器仍按照你在 macOS 中设置的时间关闭。</p>
+            </details>
+            <details>
+              <summary>可以在哪里获取 Perky？</summary>
+              <p>目前仓库提供源码和构建脚本，尚未提供已签名的下载发行包。请在 macOS 14+ 上按仓库的构建说明制作应用。</p>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <section class="disclaimer-section shell" id="brand-notice" aria-labelledby="notice-title">
+        <div class="notice-mark" aria-hidden="true">i</div>
+        <div>
+          <p class="eyebrow">品牌与商标声明</p>
+          <h2 id="notice-title">独立项目，名称仅用于说明兼容性。</h2>
+          <p>Perky 与 Apple Inc.、Xiaomi（小米）或 Redmi 没有关联、授权、赞助或合作关系。Apple、Mac、macOS、Xiaomi、小米、Redmi、红米、RedmiBook 及相关标识均为其各自权利人的名称或商标。文中提及第三方品牌仅用于识别平台与说明兼容范围，不代表认证、合作或产品支持。</p>
+        </div>
+      </section>
+
+      <section class="closing-cta shell" aria-labelledby="closing-title">
+        <div>
+          <p class="eyebrow">开始之前</p>
+          <h2 id="closing-title">查看源码，按你的 Mac 构建。</h2>
+          <p>了解当前实现、签名要求和构建步骤。</p>
+        </div>
+        <a class="button button-light" href="https://github.com/Laplace-bit/perky">
+          前往 GitHub 仓库 <span aria-hidden="true">↗</span>
+        </a>
+      </section>
+    </main>
+
+    <footer class="site-footer shell">
+      <a class="brand footer-brand" href="#top"><span class="brand-mark" aria-hidden="true">p</span><span>perky<span class="brand-period">.</span></span></a>
+      <p>原生 macOS 定时防睡眠工具 · macOS 14+</p>
+      <a href="#brand-notice">品牌与兼容性声明</a>
+    </footer>
+  </body>
+</html>
