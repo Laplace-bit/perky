@@ -97,8 +97,8 @@ jobs:
       - name: Create and notarize DMG
         shell: bash
         run: |
-          ./package-dmg.sh .build/Perky.app "$PERKY_RELEASE_VERSION" .build/release
-          DMG=".build/release/Perky-$PERKY_RELEASE_VERSION-macos-arm64.dmg"
+          ./package-dmg.sh .build/Perky.app "$PERKY_RELEASE_VERSION" .build/packages
+          DMG=".build/packages/Perky-$PERKY_RELEASE_VERSION-macos-arm64.dmg"
           xcrun notarytool submit "$DMG" --key "$RUNNER_TEMP/AuthKey.p8" \
             --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" --wait
           xcrun stapler staple "$DMG"
@@ -108,7 +108,7 @@ jobs:
       - name: Publish GitHub release
         shell: bash
         run: |
-          gh release create "$PERKY_RELEASE_TAG" .build/release/* \
+          gh release create "$PERKY_RELEASE_TAG" .build/packages/* \
             --title "Perky $PERKY_RELEASE_VERSION" \
             --generate-notes
       - name: Remove signing credentials

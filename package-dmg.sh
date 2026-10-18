@@ -11,7 +11,7 @@ if [ ! -d "$APP_DIR" ]; then
 fi
 
 VERSION=${2:-$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_DIR/Contents/Info.plist")}
-OUTPUT_DIR=${3:-"$ROOT_DIR/.build/release"}
+OUTPUT_DIR=${3:-"$ROOT_DIR/.build/packages"}
 ARCHS=$(lipo -archs "$APP_DIR/Contents/MacOS/Perky" | tr ' ' '-')
 PACKAGE_BASENAME="Perky-$VERSION-macos-$ARCHS"
 STAGING_DIR=$(mktemp -d "${TMPDIR:-/tmp}/perky-dmg.XXXXXX")
