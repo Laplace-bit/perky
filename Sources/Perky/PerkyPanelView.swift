@@ -52,16 +52,6 @@ struct PerkyPanelView: View {
             Text("剩余时间将设为 \(model.selectedDuration ?? 0) 分钟。")
         }
         .confirmationDialog(
-            "启用合盖运行？",
-            isPresented: lidExplanationPresentation,
-            titleVisibility: .visible
-        ) {
-            Button("继续设置") { model.confirmLidModeSetup() }
-            Button("取消", role: .cancel) { model.cancelLidModeSetup() }
-        } message: {
-            Text("Perky 会先尝试合盖睡眠控制；无法确认时可能回退为影响整台 Mac 的全局防睡眠设置。停止、到期、低电量或过热时会恢复。无外接屏幕的效果因机型和 macOS 而异；Apple 支持的合盖桌面模式需外接显示器、输入设备和电源。")
-        }
-        .confirmationDialog(
             "在电池供电下继续？",
             isPresented: batteryConfirmationPresentation,
             titleVisibility: .visible
@@ -280,7 +270,7 @@ struct PerkyPanelView: View {
             get: { model.isLidModeEnabled || model.isLidModeActive },
             set: { enabled in
                 guard !enabled || !model.isRunning else { return }
-                if enabled { model.requestLidModeEnable() }
+                if enabled { model.enableLidMode() }
                 else { model.disableLidMode() }
             }
         )) {
@@ -546,13 +536,6 @@ struct PerkyPanelView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.orange.opacity(0.09), in: RoundedRectangle(cornerRadius: 9))
         .accessibilityElement(children: .contain)
-    }
-
-    private var lidExplanationPresentation: Binding<Bool> {
-        Binding(
-            get: { model.isShowingLidExplanation },
-            set: { if !$0 { model.cancelLidModeSetup() } }
-        )
     }
 
     private var batteryConfirmationPresentation: Binding<Bool> {

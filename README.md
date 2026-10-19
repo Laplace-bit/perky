@@ -36,8 +36,10 @@ Apple 支持将 MacBook 连接外接显示器后合盖使用。需按具体机�
 
 ```sh
 ./package-local-installer.sh
-open .build/packages/Perky-0.1.1-macos-arm64-local.pkg
+open .build/packages/Perky-0.1.2-macos-arm64-local.pkg
 ```
+
+菜单栏中的「合盖运行」开关会立即按所选时长启动；停止、到期或触发安全条件时会恢复系统合盖策略。
 
 安装时 macOS 会请求管理员认证，并安装 system LaunchDaemon；这不同于登录项批准。若 Gatekeeper 阻止首次打开，请到“系统设置 > 隐私与安全性”手动允许。安装包不会调用 `sudo pmset`；helper 会在停止或到期时恢复它管理的系统状态。
 

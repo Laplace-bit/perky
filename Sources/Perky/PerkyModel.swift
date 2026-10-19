@@ -18,14 +18,13 @@ final class PerkyModel: ObservableObject {
     @Published private(set) var isStopping = false
     @Published private(set) var deadline: Date?
     @Published private(set) var failureMessage: String?
-    @Published private(set) var statusMessage = "合盖运行尚未启动。确认模式后选择时长并开始。"
+    @Published private(set) var statusMessage = "合盖运行尚未启动。打开开关即可启动所选时长。"
     @Published private(set) var notificationMessage: String?
     @Published private(set) var diagnosticsMessage: String?
     @Published private(set) var notificationsEnabled = false
     @Published private(set) var isStarting = false
     @Published private(set) var isLidModeEnabled = false
     @Published private(set) var isLidModeActive = false
-    @Published private(set) var isShowingLidExplanation = false
     @Published private(set) var isShowingBatteryConfirmation = false
     @Published private(set) var isShowingQuitConfirmation = false
     @Published private(set) var helperStatusMessage = ""
@@ -63,12 +62,12 @@ final class PerkyModel: ObservableObject {
     private var didNotifyStopFailure = false
     private var pendingLidStartIdentifier: String?
     private var helperRecoveryStatusLoaded = false
+    private var shouldStartLidModeWhenRecoveryStatusLoads = false
     @Published private(set) var helperRecoveryStatusUncertain = false
     private var helperMayHaveRecoveryRecord = false
     private var helperRecoveryStatusGeneration = 0
     private var recoveryOperationsInFlight = 0
     private var activeLidSessionIdentifier: String?
-    private var didConfirmLidModeSetup = false
     private var safetyMonitorTimer: Timer?
     private var clamshellObserver = ClamshellStateObserver()
     private var screenParametersObserver: NSObjectProtocol?
@@ -98,9 +97,13 @@ final class PerkyModel: ObservableObject {
         isCustomDurationSelected = userDefaults.bool(forKey: customSelectedKey)
         notificationsEnabled = userDefaults.bool(forKey: notificationsEnabledKey)
         let savedLidModeEnabled = userDefaults.object(forKey: lidModeEnabledKey) as? Bool
-        isLidModeEnabled = savedLidModeEnabled ?? true
-        isShowingLidExplanation = savedLidModeEnabled == nil
-        didConfirmLidModeSetup = savedLidModeEnabled != nil
+        // Before the toggle started a session, this preference meant only
+        // “use lid mode when the Start button is pressed.” Do not restore that
+        // stale selection as an active-looking toggle after upgrading.
+        isLidModeEnabled = false
+        if savedLidModeEnabled == true {
+            userDefaults.set(false, forKey: lidModeEnabledKey)
+        }
         brightnessAutomationEnabled = userDefaults.bool(forKey: brightnessAutomationEnabledKey)
         brightnessTargetPercent = BrightnessPolicy.clampedTargetPercent(
             userDefaults.object(forKey: brightnessTargetPercentKey) as? Int ?? 10
@@ -203,33 +206,20 @@ final class PerkyModel: ObservableObject {
         persistDurationPreferences()
     }
 
-    func requestLidModeEnable() {
-        didConfirmLidModeSetup = false
-        isShowingLidExplanation = true
-    }
-
-    func confirmLidModeSetup() {
-        didConfirmLidModeSetup = true
-        isShowingLidExplanation = false
+    func enableLidMode() {
         isLidModeEnabled = true
         userDefaults.set(true, forKey: lidModeEnabledKey)
         helperStatusMessage = lidPowerHelper.register()
         helperIsEnabled = lidPowerHelper.isEnabled
         helperCanRegister = lidPowerHelper.hasTrustedSigningIdentity
         helperNeedsApproval = lidPowerHelper.requiresApproval
-        lidModeStatusMessage = "已选择合盖运行。Perky 会优先限时改变合盖睡眠策略；必要时使用系统级回退，并在停止或到期时恢复。"
+        lidModeStatusMessage = "正在启动限时合盖运行；停止、到期或触发安全条件时会恢复系统策略。"
         refreshHelperRecoveryStatus()
-    }
-
-    func cancelLidModeSetup() {
-        guard isShowingLidExplanation else { return }
-        isShowingLidExplanation = false
-        isLidModeEnabled = false
-        userDefaults.set(false, forKey: lidModeEnabledKey)
-        statusMessage = "合盖运行未启动。普通保持唤醒不会控制合盖睡眠。"
+        start()
     }
 
     func disableLidMode() {
+        shouldStartLidModeWhenRecoveryStatusLoads = false
         isLidModeEnabled = false
         userDefaults.set(false, forKey: lidModeEnabledKey)
         if isStarting {
@@ -401,14 +391,10 @@ final class PerkyModel: ObservableObject {
 
     func start() {
         guard !isRunning, !isStopping, !isStarting else { return }
-        guard !isShowingLidExplanation,
-              !isLidModeEnabled || didConfirmLidModeSetup else {
-            failureMessage = "请先确认合盖运行说明，再启动合盖会话。"
-            return
-        }
         if !helperRecoveryStatusLoaded && helperIsEnabled {
+            shouldStartLidModeWhenRecoveryStatusLoads = true
             refreshHelperRecoveryStatus()
-            failureMessage = "正在检查独立恢复助手的状态，请检查完成后再启动新计时。"
+            statusMessage = "正在检查独立恢复助手的状态…"
             return
         }
         guard helperRecoveryIdentifier == nil,
@@ -900,7 +886,10 @@ final class PerkyModel: ObservableObject {
         isRunning = false
         isStopping = false
         isStarting = false
+        isLidModeEnabled = false
         isLidModeActive = false
+        shouldStartLidModeWhenRecoveryStatusLoads = false
+        userDefaults.set(false, forKey: lidModeEnabledKey)
         activeLidSessionIdentifier = nil
         safetyMonitorTimer?.invalidate()
         safetyMonitorTimer = nil
@@ -1061,6 +1050,10 @@ final class PerkyModel: ObservableObject {
                     || self.helperRecoveryIdentifier != nil
                     || self.isLidModeActive
                     || self.isStarting
+            }
+            if self.shouldStartLidModeWhenRecoveryStatusLoads {
+                self.shouldStartLidModeWhenRecoveryStatusLoads = false
+                if self.isLidModeEnabled { self.start() }
             }
         }
     }
