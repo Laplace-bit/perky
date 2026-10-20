@@ -41,7 +41,7 @@ final class PerkyModel: ObservableObject {
     @Published private(set) var currentBatteryPercent: Int?
     @Published private(set) var isOnACPower = false
     @Published private(set) var currentLidClosed: Bool?
-    @Published private(set) var currentClamshellWillSleep: Bool?
+    @Published private(set) var currentSystemSleepDisabled: Bool?
     @Published private(set) var brightnessStatusMessage = ""
     @Published private(set) var isBrightnessAvailable = false
     @Published private(set) var brightnessAutomationEnabled = false
@@ -764,7 +764,9 @@ final class PerkyModel: ObservableObject {
             ? "合盖 helper：检测到系统设置冲突，需要你选择恢复或保留。"
             : (lidPowerHelper.isEnabled ? "合盖 helper：已获准运行。" : "合盖 helper：尚未获准运行。")
         let lidStatus = isLidModeActive
-            ? "合盖模式：已启用，helper 会按期限恢复合盖策略。"
+            ? (currentSystemSleepDisabled == true
+                ? "合盖模式：系统级防睡眠已确认生效，停止或到期时恢复。"
+                : "合盖模式：系统级防睡眠未确认，请停止后重试。")
             : "合盖模式：\(lidReadinessMessage)"
         let brightnessStatus = brightnessController.isAvailable
             ? "内建屏幕亮度：接口可用（macOS 26 使用非公开 DisplayServices 接口）。"
@@ -1124,7 +1126,7 @@ final class PerkyModel: ObservableObject {
         currentBatteryPercent = snapshot.batteryPercent
         isOnACPower = snapshot.isOnACPower
         currentLidClosed = snapshot.isLidClosed
-        currentClamshellWillSleep = snapshot.clamshellWillSleep
+        currentSystemSleepDisabled = snapshot.systemSleepDisabled
         lidReadinessMessage = snapshot.readinessMessage
         if !snapshot.isOnACPower {
             if let battery = snapshot.batteryPercent {
@@ -1141,10 +1143,14 @@ final class PerkyModel: ObservableObject {
         let snapshot = LidModeSnapshot.current()
         updateSnapshot(snapshot)
         if isLidModeActive {
+            if snapshot.systemSleepDisabled == true {
+                lidModeStatusMessage = snapshot.isLidClosed == true
+                    ? "已合盖；macOS 防睡眠生效，Perky 会话继续运行。"
+                    : "合盖模式已启用；合盖后会话将继续运行。"
+            } else {
+                lidModeStatusMessage = "macOS 未确认系统级防睡眠生效；合盖可能触发睡眠，请停止后重试。"
+            }
             if snapshot.isLidClosed == true {
-                if snapshot.clamshellWillSleep == true {
-                    lidModeStatusMessage = "macOS 仍报告合盖会触发睡眠；请开盖检查，Perky 无法确认本机合盖运行已生效。"
-                }
                 if brightnessAutomationEnabled { applyClosedLidBrightness() }
             } else if snapshot.isLidClosed == false {
                 restoreBrightnessIfAppropriate()

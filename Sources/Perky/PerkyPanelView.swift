@@ -345,8 +345,8 @@ struct PerkyPanelView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if model.isLidModeActive && model.currentClamshellWillSleep == true {
-                Label("本机仍可能在合盖时睡眠", systemImage: "exclamationmark.triangle")
+            if model.isLidModeActive && model.currentSystemSleepDisabled != true {
+                Label("系统级防睡眠未确认，合盖可能触发睡眠", systemImage: "exclamationmark.triangle")
                     .font(.caption2)
                     .foregroundStyle(.orange)
                     .help(model.lidModeStatusMessage)

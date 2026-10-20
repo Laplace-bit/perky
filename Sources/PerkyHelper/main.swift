@@ -11,7 +11,6 @@ private func perkyFlock(_ descriptor: Int32, _ operation: Int32) -> Int32
 
 private let helperMachServiceName = "com.perky.app.lid-helper"
 private let pmsetPath = "/usr/bin/pmset"
-private let powerPreferencesPath = "/Library/Preferences/com.apple.PowerManagement.plist"
 private let localAdminInstallArgument = "--perky-local-admin-install"
 private let localAppExecutablePath = "/Applications/Perky.app/Contents/MacOS/Perky"
 private let localHelperExecutablePath = "/Library/PrivilegedHelperTools/com.perky.app.lid-helper"
@@ -252,8 +251,6 @@ private final class LidPowerRecoveryManager: NSObject, LidPowerHelperProtocol {
         var ownsSleepDisabled: Bool
         var phase: Phase
         var mechanism: Mechanism? = nil
-        var fingerprintBeforeWrite: String?
-        var fingerprintAfterWrite: String?
         var message: String?
     }
 
@@ -277,15 +274,15 @@ private final class LidPowerRecoveryManager: NSObject, LidPowerHelperProtocol {
         switch record.phase {
         case .applying:
             if record.mechanism == .clamshellSleepState {
-                guard restoreClamshellSleepPolicy() else {
+                guard resetClamshellSleepState() else {
                     record.phase = .conflict
-                    record.message = "恢复助手在应用合盖策略时中断，macOS 未确认已恢复默认合盖睡眠；请重新打开 Perky 处理。"
+                    record.message = "旧版合盖策略在应用时中断，且无法重置；请重启 Mac 恢复默认合盖睡眠后再清除记录。"
                     if !save(record) { currentRecord = record }
                     return
                 }
                 guard removeRecord() else {
                     record.phase = .conflict
-                    record.message = "默认合盖睡眠已恢复，但无法删除系统恢复记录；请重新打开 Perky 清理记录。"
+                    record.message = "旧版合盖策略已重置，但无法删除系统恢复记录；请重新打开 Perky 清理记录。"
                     if !save(record) { currentRecord = record }
                     return
                 }
@@ -301,6 +298,21 @@ private final class LidPowerRecoveryManager: NSObject, LidPowerHelperProtocol {
         case .conflict:
             break
         case .active:
+            if let mechanism = record.mechanism, mechanism != .pmsetSleepDisabled {
+                if mechanism == .clamshellSleepState, !resetClamshellSleepState() {
+                    record.phase = .conflict
+                    record.message = "旧版合盖策略无法重置；请重启 Mac 恢复默认合盖睡眠后再清除记录。"
+                    if !save(record) { currentRecord = record }
+                    return
+                }
+                guard removeRecord() else {
+                    record.phase = .conflict
+                    record.message = "旧版合盖策略已清理，但无法删除系统恢复记录；请重新打开 Perky 清理记录。"
+                    if !save(record) { currentRecord = record }
+                    return
+                }
+                return
+            }
             processActiveSession(record)
         }
     }
@@ -372,8 +384,6 @@ private final class LidPowerRecoveryManager: NSObject, LidPowerHelperProtocol {
                 originalSleepDisabled: true,
                 ownsSleepDisabled: false,
                 phase: .active,
-                fingerprintBeforeWrite: nil,
-                fingerprintAfterWrite: nil,
                 message: "SleepDisabled 在 Perky 启动前已开启；Perky 不会更改或覆盖它。"
             )
             guard save(record) else {
@@ -385,91 +395,8 @@ private final class LidPowerRecoveryManager: NSObject, LidPowerHelperProtocol {
             return
         }
 
-        if currentClamshellCausesSleep() == false {
-            let record = RecoveryRecord(
-                identifier: identifier,
-                deadline: deadline,
-                batteryThresholdPercent: batteryThresholdPercent,
-                originalSleepDisabled: originalValue ?? false,
-                ownsSleepDisabled: false,
-                phase: .active,
-                mechanism: .preexistingClamshellPolicy,
-                fingerprintBeforeWrite: nil,
-                fingerprintAfterWrite: nil,
-                message: "macOS 已报告合盖不会触发睡眠；Perky 保留现有策略，没有更改系统电源设置。"
-            )
-            guard save(record) else {
-                reply(false, "无法持久保存恢复期限；Perky 保留了现有合盖策略，没有更改系统设置。")
-                return
-            }
-            scheduleExpiry(for: record)
-            reply(true, record.message)
-            return
-        }
-
-        if currentClamshellCausesSleep() == true {
-            var record = RecoveryRecord(
-                identifier: identifier,
-                deadline: deadline,
-                batteryThresholdPercent: batteryThresholdPercent,
-                originalSleepDisabled: originalValue ?? false,
-                ownsSleepDisabled: false,
-                phase: .applying,
-                mechanism: .clamshellSleepState,
-                fingerprintBeforeWrite: nil,
-                fingerprintAfterWrite: nil,
-                message: nil
-            )
-            guard save(record) else {
-                reply(false, "无法持久保存合盖策略恢复期限；Perky 没有修改系统合盖行为。")
-                return
-            }
-
-            let applyStatus = setClamshellSleepDisabled(true)
-            if applyStatus == kIOReturnSuccess,
-               currentClamshellCausesSleep() == false {
-                record.phase = .active
-                record.message = "macOS 当前报告合盖不会触发睡眠；Perky 会在停止、到期或热压力过高时恢复默认策略。"
-                guard save(record) else {
-                    record.phase = .conflict
-                    record.message = "合盖策略已启用，但恢复期限未能持久保存；Perky 正尝试恢复默认策略。"
-                    currentRecord = record
-                    let restored = restoreIfStillOwned(record)
-                    reply(false, restored.0
-                        ? "恢复期限保存失败；默认合盖策略已恢复，合盖模式未开启。"
-                        : (restored.1 ?? record.message))
-                    return
-                }
-                scheduleExpiry(for: record)
-                reply(true, record.message)
-                return
-            }
-
-            guard restoreClamshellSleepPolicy() else {
-                record.phase = .conflict
-                record.message = "macOS 未确认合盖策略已启用或恢复；Perky 保留恢复记录，不会继续修改其他睡眠设置。"
-                _ = save(record)
-                currentRecord = record
-                reply(false, record.message)
-                return
-            }
-            guard removeRecord() else {
-                record.phase = .conflict
-                record.message = "合盖策略未启用，且无法清理恢复记录；请重新打开 Perky 处理。"
-                _ = save(record)
-                currentRecord = record
-                reply(false, record.message)
-                return
-            }
-        }
-
         guard originalValue == false else {
             reply(false, "无法通过 pmset 确认当前系统睡眠设置；Perky 未修改系统设置。")
-            return
-        }
-
-        guard let beforeFingerprint = powerPreferencesFingerprint() else {
-            reply(false, "无法记录系统电源设置的所有权信息；为避免无法安全恢复，未修改系统设置。")
             return
         }
 
@@ -481,8 +408,6 @@ private final class LidPowerRecoveryManager: NSObject, LidPowerHelperProtocol {
             ownsSleepDisabled: true,
             phase: .applying,
             mechanism: .pmsetSleepDisabled,
-            fingerprintBeforeWrite: beforeFingerprint,
-            fingerprintAfterWrite: nil,
             message: nil
         )
         guard save(record) else {
@@ -490,34 +415,26 @@ private final class LidPowerRecoveryManager: NSObject, LidPowerHelperProtocol {
             return
         }
 
-        guard runPMSet(["-a", "disablesleep", "1"]).success else {
+        let writeResult = runPMSet(["-a", "disablesleep", "1"])
+        guard waitForSleepDisabled(true) else {
             let currentValue = currentSleepDisabled()
-            let currentFingerprint = powerPreferencesFingerprint()
-            if currentValue == false, currentFingerprint == beforeFingerprint {
+            if currentValue == false {
                 guard removeRecord() else {
                     record.phase = .conflict
-                    record.fingerprintAfterWrite = currentFingerprint
                     record.message = "SleepDisabled 已核实未改变，但无法删除系统恢复记录。请在恢复面板选择保留当前值以重试清理。"
                     if !save(record) { currentRecord = record }
                     reply(false, record.message)
                     return
                 }
-                reply(false, "pmset 未能启用系统级防睡眠设置；已核实原设置未变化。")
+                reply(false, writeResult.success
+                    ? "pmset 返回成功，但系统未确认 SleepDisabled 已启用；已核实原设置未变化。"
+                    : "pmset 未能启用系统级防睡眠设置；已核实原设置未变化。")
                 return
             }
             record.phase = .conflict
-            record.fingerprintAfterWrite = currentFingerprint
-            record.message = "pmset 未确认完成；设置是否已更改无法安全判断。Perky 保留恢复记录，请选择保留当前值或恢复启用前的值。"
-            _ = save(record)
-            currentRecord = record
-            reply(false, record.message)
-            return
-        }
-        guard currentSleepDisabled() == true,
-              let afterFingerprint = powerPreferencesFingerprint(),
-              afterFingerprint != beforeFingerprint else {
-            record.phase = .conflict
-            record.message = "pmset 返回后未能验证设置变化及所有权；Perky 停止自动写入，请检查系统电源设置。"
+            record.message = currentValue == nil
+                ? "无法确认 SleepDisabled 是否已启用；Perky 停止自动写入，请检查系统电源设置。"
+                : "SleepDisabled 已启用，但未能确认持续生效；Perky 保留恢复记录，请检查系统电源设置。"
             _ = save(record)
             currentRecord = record
             reply(false, record.message)
@@ -525,8 +442,7 @@ private final class LidPowerRecoveryManager: NSObject, LidPowerHelperProtocol {
         }
 
         record.phase = .active
-        record.fingerprintAfterWrite = afterFingerprint
-        record.message = nil
+        record.message = "macOS 已确认系统级防睡眠生效；合盖后将继续运行。"
         guard save(record) else {
             record.phase = .conflict
             record.message = "SleepDisabled 已更改，但恢复记录更新失败；Perky 正尝试立即恢复原值。"
@@ -537,10 +453,8 @@ private final class LidPowerRecoveryManager: NSObject, LidPowerHelperProtocol {
                 : (restored.1 ?? record.message))
             return
         }
-        if expiryTimer == nil {
-            scheduleExpiry(for: record)
-        }
-        reply(true, nil)
+        scheduleExpiry(for: record)
+        reply(true, record.message)
     }
 
     func stopSession(identifier: String, reply: @escaping (Bool, String?) -> Void) {
@@ -589,18 +503,18 @@ private final class LidPowerRecoveryManager: NSObject, LidPowerHelperProtocol {
                 return
             }
             if record.mechanism == .clamshellSleepState {
-                guard restoreClamshellSleepPolicy() else {
-                    reply(false, "macOS 未确认默认合盖策略已恢复；Perky 会保留恢复记录并允许重试。")
+                guard resetClamshellSleepState() else {
+                    reply(false, "无法重置旧版合盖策略；请重启 Mac 后重试清理。")
                     return
                 }
                 guard removeRecord() else {
                     var retained = record
-                    retained.message = "默认合盖策略已恢复，但无法删除恢复记录；请重试清理。"
+                    retained.message = "旧版合盖策略已重置，但无法删除恢复记录；请重试清理。"
                     if !save(retained) { currentRecord = retained }
                     reply(false, retained.message)
                     return
                 }
-                reply(true, "已恢复 macOS 默认合盖睡眠策略。")
+                reply(true, "已重置旧版合盖策略。")
                 return
             }
             guard runPMSet(["-a", "disablesleep", record.originalSleepDisabled ? "1" : "0"]).success,
@@ -663,21 +577,21 @@ private final class LidPowerRecoveryManager: NSObject, LidPowerHelperProtocol {
 
     private func restoreIfStillOwned(_ record: RecoveryRecord) -> (Bool, String?) {
         if record.mechanism == .clamshellSleepState {
-            guard restoreClamshellSleepPolicy() else {
+            guard resetClamshellSleepState() else {
                 let updated = scheduleImmediateRestoreRetry(
                     for: record,
-                    message: "macOS 暂未确认默认合盖策略已恢复；独立 helper 会继续重试。"
+                    message: "暂时无法重置旧版合盖策略；独立 helper 会继续重试，重启 Mac 也可清除该状态。"
                 )
                 return (false, updated.message)
             }
             guard removeRecord() else {
                 let updated = scheduleImmediateRestoreRetry(
                     for: record,
-                    message: "默认合盖策略已恢复，但无法清除恢复记录；独立 helper 会继续重试。"
+                    message: "旧版合盖策略已重置，但无法清除恢复记录；独立 helper 会继续重试。"
                 )
                 return (false, updated.message)
             }
-            return (true, "已恢复 macOS 默认合盖睡眠策略。")
+            return (true, "已重置旧版合盖策略。")
         }
 
         guard record.ownsSleepDisabled else {
@@ -709,22 +623,19 @@ private final class LidPowerRecoveryManager: NSObject, LidPowerHelperProtocol {
             return (true, nil)
         }
 
-        guard let expectedFingerprint = record.fingerprintAfterWrite,
-              let currentFingerprint = powerPreferencesFingerprint() else {
-            let updated = scheduleImmediateRestoreRetry(
-                for: record,
-                message: "暂时无法验证系统电源设置归属；恢复记录仍有效，Perky 会继续重试。"
-            )
-            return (false, updated.message)
-        }
-        guard currentValue, currentFingerprint == expectedFingerprint else {
-            let message = "系统电源设置在 Perky 运行期间发生变化。Perky 没有覆盖新状态；请明确选择保留或恢复 Perky 启用前的 SleepDisabled 值。"
-            markConflict(record, message: message)
-            return (false, message)
-        }
-
         let restoreValue = record.originalSleepDisabled ? "1" : "0"
         let writeResult = runPMSet(["-a", "disablesleep", restoreValue])
+        if waitForSleepDisabled(record.originalSleepDisabled) {
+            guard removeRecord() else {
+                let updated = scheduleImmediateRestoreRetry(
+                    for: record,
+                    message: "SleepDisabled 已恢复，但无法清除系统恢复记录；独立 helper 会继续重试。"
+                )
+                return (false, updated.message)
+            }
+            return (true, nil)
+        }
+
         let verifiedValue = currentSleepDisabled()
         if verifiedValue == record.originalSleepDisabled {
             guard removeRecord() else {
@@ -736,26 +647,14 @@ private final class LidPowerRecoveryManager: NSObject, LidPowerHelperProtocol {
             }
             return (true, nil)
         }
-        if verifiedValue == true,
-           powerPreferencesFingerprint() == expectedFingerprint {
-            let message = writeResult.success
+
+        let message = verifiedValue == nil
+            ? "暂时无法确认 SleepDisabled 是否已恢复；Perky 保留恢复记录并继续重试。"
+            : (writeResult.success
                 ? "macOS 暂未确认 SleepDisabled 已恢复；Perky 会继续尝试恢复。"
-                : "pmset 暂时未能恢复 SleepDisabled；Perky 会在独立 helper 中继续尝试。"
-            let updated = scheduleImmediateRestoreRetry(for: record, message: message)
-            return (false, updated.message)
-        }
-
-        if verifiedValue == nil {
-            let updated = scheduleImmediateRestoreRetry(
-                for: record,
-                message: "暂时无法确认 SleepDisabled 是否已恢复；Perky 保留恢复记录并继续重试。"
-            )
-            return (false, updated.message)
-        }
-
-        let message = "恢复期间系统电源设置发生变化。Perky 没有覆盖新状态；请明确选择保留当前值或恢复启用前的值。"
-        markConflict(record, message: message)
-        return (false, message)
+                : "pmset 暂时未能恢复 SleepDisabled；Perky 会在独立 helper 中继续尝试。")
+        let updated = scheduleImmediateRestoreRetry(for: record, message: message)
+        return (false, updated.message)
     }
 
     private func scheduleImmediateRestoreRetry(for record: RecoveryRecord, message: String) -> RecoveryRecord {
@@ -807,11 +706,12 @@ private final class LidPowerRecoveryManager: NSObject, LidPowerHelperProtocol {
             _ = restoreIfStillOwned(record)
             return
         }
-        if record.mechanism == .clamshellSleepState,
-           currentClamshellCausesSleep() == true {
+        if record.ownsSleepDisabled,
+           record.mechanism != .clamshellSleepState,
+           currentSleepDisabled() == false {
             markConflict(
                 record,
-                message: "macOS 又报告合盖会触发睡眠。Perky 已停止自动修改这个全局实验性状态；请开盖并处理恢复提示。"
+                message: "系统级防睡眠在会话期间被关闭。Perky 没有覆盖这个新状态；请选择保留当前值或恢复启用前的值。"
             )
             return
         }
@@ -893,29 +793,8 @@ private final class LidPowerRecoveryManager: NSObject, LidPowerHelperProtocol {
         return nil
     }
 
-    private func currentClamshellCausesSleep() -> Bool? {
-        let rootDomain = IOServiceGetMatchingService(
-            kIOMainPortDefault,
-            IOServiceMatching("IOPMrootDomain")
-        )
-        guard rootDomain != IO_OBJECT_NULL else { return nil }
-        defer { IOObjectRelease(rootDomain) }
-
-        guard let value = IORegistryEntryCreateCFProperty(
-            rootDomain,
-            "AppleClamshellCausesSleep" as CFString,
-            kCFAllocatorDefault,
-            0
-        )?.takeRetainedValue() as? NSNumber else {
-            return nil
-        }
-        return value.boolValue
-    }
-
-    private func restoreClamshellSleepPolicy() -> Bool {
-        if currentClamshellCausesSleep() == true { return true }
-        guard setClamshellSleepDisabled(false) == kIOReturnSuccess else { return false }
-        return currentClamshellCausesSleep() == true
+    private func resetClamshellSleepState() -> Bool {
+        setClamshellSleepDisabled(false) == kIOReturnSuccess
     }
 
     private func setClamshellSleepDisabled(_ disabled: Bool) -> IOReturn {
@@ -978,16 +857,14 @@ private final class LidPowerRecoveryManager: NSObject, LidPowerHelperProtocol {
         return (process.terminationStatus == 0, output + error)
     }
 
-    private func powerPreferencesFingerprint() -> String? {
-        var information = stat()
-        guard lstat(powerPreferencesPath, &information) == 0 else { return nil }
-        return [
-            String(information.st_dev),
-            String(information.st_ino),
-            String(information.st_size),
-            String(information.st_mtimespec.tv_sec),
-            String(information.st_mtimespec.tv_nsec)
-        ].joined(separator: ":")
+    private func waitForSleepDisabled(_ expected: Bool, attempts: Int = 10) -> Bool {
+        for attempt in 0..<attempts {
+            if currentSleepDisabled() == expected { return true }
+            if attempt < attempts - 1 {
+                Thread.sleep(forTimeInterval: 0.2)
+            }
+        }
+        return false
     }
 
     private func loadRecord() -> RecoveryRecord? {

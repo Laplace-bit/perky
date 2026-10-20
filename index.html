@@ -8,7 +8,7 @@
     <title>Perky：MacBook 合盖后继续运行任务的 macOS 工具</title>
     <meta
       name="description"
-      content="Perky 帮助 MacBook 合盖后继续运行下载、构建和远程任务。外接显示器桌面模式遵循 Apple 支持条件；无外接屏幕方案为实验性 IOKit 覆盖，需要授权，且不保证所有机型。"
+      content="Perky 帮助 MacBook 合盖后继续运行下载、构建和远程任务。通过管理员授权的本机 helper 临时启用系统级防睡眠，停止或到期时恢复；外接显示器桌面模式遵循 Apple 支持条件。"
     />
     <link rel="canonical" href="https://laplace-bit.github.io/perky/" />
     <link rel="stylesheet" href="styles.css" />
@@ -22,14 +22,14 @@
     <meta property="og:title" content="Perky：MacBook 合盖后继续运行任务" />
     <meta
       property="og:description"
-      content="让 MacBook 合盖后继续运行下载、构建和远程任务。外接显示器桌面模式由 Apple 支持；无外接屏幕方案为实验性 IOKit 覆盖，效果因机型和系统而异。"
+      content="让 MacBook 合盖后继续运行下载、构建和远程任务。Perky 通过本机恢复 helper 临时启用系统级防睡眠，并在停止、到期或安全停止时恢复。"
     />
     <meta property="og:url" content="https://laplace-bit.github.io/perky/" />
     <meta name="twitter:card" content="summary" />
     <meta name="twitter:title" content="Perky：MacBook 合盖后继续运行任务" />
     <meta
       name="twitter:description"
-      content="MacBook 合盖后继续运行任务的 macOS 菜单栏工具。外接屏幕桌面模式遵循 Apple 支持条件；无屏方案属于实验性 IOKit 覆盖。"
+      content="MacBook 合盖后继续运行任务的 macOS 菜单栏工具。通过本机恢复 helper 临时启用系统级防睡眠，并在会话结束时恢复。"
     />
     <script type="application/ld+json">
       {
@@ -47,12 +47,12 @@
             "applicationCategory": "UtilitiesApplication",
             "operatingSystem": "macOS 14 and later",
             "url": "https://laplace-bit.github.io/perky/",
-            "description": "帮助 MacBook 在合盖后继续运行任务的原生 macOS 菜单栏工具。无外接显示器的 IOKit 合盖覆盖属于实验性功能，不保证所有机型。",
+            "description": "帮助 MacBook 在合盖后继续运行任务的原生 macOS 菜单栏工具。通过管理员安装的本机恢复 helper 临时启用系统级防睡眠，并在停止或到期时恢复。",
             "featureList": [
               "MacBook 限时合盖运行会话",
-              "Apple 支持的外接显示器合盖桌面模式",
-              "实验性的无外接显示器 IOKit 合盖覆盖",
-              "pmset 全局回退及限时系统状态恢复"
+              "系统级防睡眠（SleepDisabled）及效果验证",
+              "外接显示器合盖桌面模式",
+              "停止、到期或安全条件触发时恢复原设置"
             ]
           },
           {
@@ -71,12 +71,12 @@
                 "name": "没有外接显示器，Perky 也能在 MacBook 合盖后继续运行吗？",
                 "acceptedAnswer": {
                   "@type": "Answer",
-                  "text": "Perky 提供实验性的 IOKit 合盖覆盖。macOS SDK 中存在相关 selector，但 Apple 没有承诺第三方 App 可以依赖此接口；支持情况可能随机型和 macOS 版本变化，不保证所有 MacBook 均可使用。项目安装包会请求管理员认证并安装本机恢复 helper；首次运行可能需要在 macOS 隐私与安全性设置中允许打开。"
+                  "text": "可以。Perky 通过管理员安装的本机恢复 helper 临时执行 pmset -a disablesleep 1，使 macOS 在合盖后不进入睡眠，并用 pmset -g 验证设置已生效。该设置是全局的，Perky 只提供限时会话，并在停止、到期或安全停止时恢复启用前的值。"
                 }
               },
               {
                 "@type": "Question",
-                "name": "pmset 回退会改动整台 Mac 吗？",
+                "name": "pmset disablesleep 会改动整台 Mac 吗？",
                 "acceptedAnswer": {
                   "@type": "Answer",
                   "text": "会。pmset -a disablesleep 是全局系统级设置。Perky 记录启用前的值，并在会话结束时恢复；若无法确认恢复或系统设置被外部更改，应用会保留恢复记录并提示处理。"
@@ -117,7 +117,7 @@
           <p class="eyebrow"><span class="eyebrow-dot"></span> MacBook 限时合盖运行工具</p>
           <h1 id="hero-title">MacBook 合盖后，<br /><em>任务继续运行。</em></h1>
           <p class="hero-intro">
-            Perky 帮助下载、构建和远程任务在 MacBook 合盖后继续运行。接外接显示器时遵循 Apple 支持的桌面模式；无外接屏幕时使用实验性 IOKit 覆盖，需管理员安装恢复 helper，且不保证所有机型。
+            Perky 帮助下载、构建和远程任务在 MacBook 合盖后继续运行。它通过管理员安装的本机恢复 helper 临时启用系统级防睡眠，并用系统命令验证生效；停止、到期或触发安全条件时恢复原设置。
           </p>
           <div class="hero-actions">
             <a class="button button-dark" href="https://github.com/Laplace-bit/perky">
@@ -125,7 +125,7 @@
             </a>
             <a class="text-link" href="#compatibility">查看兼容范围 <span aria-hidden="true">↓</span></a>
           </div>
-          <p class="hero-note">macOS 14+ · 无外接屏幕方案为实验性功能 · 恢复助手需管理员授权</p>
+          <p class="hero-note">macOS 14+ · 限时合盖运行 · 系统设置会在会话结束时恢复</p>
         </div>
 
         <div class="product-scene" aria-label="Perky 菜单栏面板示意图">
@@ -155,7 +155,7 @@
         <div class="shell fact-grid">
           <p><span class="fact-kicker">核心用途</span><strong>MacBook 合盖运行任务</strong></p>
           <p><span class="fact-kicker">外接显示器</span><strong>Apple 支持的桌面模式</strong></p>
-          <p><span class="fact-kicker">无外接屏幕</span><strong>实验性 IOKit 覆盖</strong></p>
+          <p><span class="fact-kicker">无外接屏幕</span><strong>系统级防睡眠 · 限时恢复</strong></p>
           <p><span class="fact-kicker">平台</span><strong>macOS 14+</strong></p>
         </div>
       </section>
@@ -163,24 +163,24 @@
       <section class="section shell" id="how-it-works" aria-labelledby="how-title">
         <div class="section-heading">
           <p class="eyebrow">01 / MacBook 合盖运行方式</p>
-          <h2 id="how-title">先区分外接屏幕与无屏方案。</h2>
-          <p>Apple 支持的外接显示器桌面模式与 Perky 的无外接屏幕实验性覆盖是两条不同路径。Perky 另有全局电源回退，所有临时设置都需要按记录恢复。</p>
+          <h2 id="how-title">合盖运行，靠可验证的系统设置。</h2>
+          <p>Perky 使用系统级 <code>SleepDisabled</code> 防止合盖睡眠，并在每次启动后用 <code>pmset -g</code> 验证；外接显示器桌面模式仍遵循 Apple 支持条件。所有临时设置都会按记录恢复。</p>
         </div>
         <div class="steps-grid">
           <article class="step-card">
             <span class="step-index">01</span>
-            <h3>外接显示器 · Apple 支持</h3>
-            <p>Apple 支持 MacBook 连接外接显示器及所需输入配件后合盖使用。具体供电、显示器与配件要求以你的机型为准。<a href="https://support.apple.com/zh-cn/102282">查看 Apple 使用说明</a>。</p>
+            <h3>系统级防睡眠 · 合盖继续运行</h3>
+            <p>本机恢复 helper 执行 <code>pmset -a disablesleep 1</code>，阻止合盖和空闲睡眠；Perky 会验证设置已生效，并在会话期间持续复查。</p>
           </article>
           <article class="step-card">
             <span class="step-index">02</span>
-            <h3>无外接显示器 · 实验性 IOKit</h3>
-            <p>macOS SDK 中存在相关 IOKit selector，但 Apple 未承诺第三方 App 可依赖。效果会因 Mac 机型和 macOS 版本而异，不保证所有设备可用。</p>
+            <h3>外接显示器 · Apple 支持</h3>
+            <p>连接外接显示器及所需输入配件后合盖使用是 Apple 支持的桌面模式。具体供电、显示器与配件要求以你的机型为准。<a href="https://support.apple.com/zh-cn/102282">查看 Apple 使用说明</a>。</p>
           </article>
           <article class="step-card">
             <span class="step-index">03</span>
-            <h3>系统级回退 · 记录并恢复</h3>
-            <p><code>pmset -a disablesleep</code> 是影响整台 Mac 的全局设置。Perky 记录原值并在会话结束后恢复；无法确认恢复时会保留记录并提示处理。</p>
+            <h3>限时恢复 · 失败不覆盖</h3>
+            <p>系统级设置会影响整台 Mac。Perky 记录原值，在停止、到期或安全停止时恢复；若设置被外部改动，会保留记录并提示你选择处理方式。</p>
           </article>
         </div>
       </section>
@@ -190,7 +190,7 @@
           <div class="section-heading mode-heading">
             <p class="eyebrow">02 / 合盖路径与系统边界</p>
             <h2 id="mode-title">合盖运行有条件，基础模式不等同。</h2>
-            <p>Apple 外接显示器桌面模式由系统支持；无外接屏幕时属于实验性覆盖。开盖基础防空闲睡眠是另一种功能。</p>
+            <p>系统级防睡眠会同时影响合盖与空闲睡眠；外接显示器桌面模式由系统支持。开盖基础防空闲睡眠是另一种功能。</p>
           </div>
           <div class="mode-list">
             <article class="mode-row">
@@ -204,16 +204,16 @@
             <article class="mode-row">
               <div class="mode-symbol symbol-lid" aria-hidden="true">⌑</div>
               <div>
-                <div class="mode-title-line"><h3>无外接显示器合盖覆盖</h3><span class="mode-tag mode-tag-outline">实验性 · 需授权</span></div>
-                <p>使用 macOS SDK 中可见的 IOKit selector 尝试覆盖合盖睡眠行为。Apple 未承诺第三方 App 使用该接口，Perky 不能保证所有 MacBook 或 macOS 版本可用。</p>
+                <div class="mode-title-line"><h3>系统级防睡眠</h3><span class="mode-tag mode-tag-outline">需 helper 授权</span></div>
+                <p>helper 设置 <code>SleepDisabled</code>，让 Mac 在合盖后继续运行；启动时会验证生效，会话期间如果设置被改动则停止覆盖并提示处理。</p>
               </div>
               <span class="row-arrow" aria-hidden="true">↗</span>
             </article>
             <article class="mode-row">
               <div class="mode-symbol symbol-lid" aria-hidden="true">⌑</div>
               <div>
-                <div class="mode-title-line"><h3>pmset 全局回退</h3><span class="mode-tag mode-tag-outline">需限时恢复</span></div>
-                <p>回退方案会设置全局 <code>SleepDisabled</code>，影响整台 Mac，而非只针对 Perky。Perky 记录原状态并在结束后恢复；恢复异常会保留记录并提示处理。</p>
+                <div class="mode-title-line"><h3>限时恢复</h3><span class="mode-tag mode-tag-outline">停止或到期时执行</span></div>
+                <p>系统级 <code>SleepDisabled</code> 影响整台 Mac，而非只针对 Perky。Perky 记录原状态并在结束后恢复；恢复异常会保留记录并提示处理。</p>
               </div>
               <span class="row-arrow" aria-hidden="true">↗</span>
             </article>
@@ -233,20 +233,20 @@
         <div class="section-heading">
           <p class="eyebrow">03 / 先看设备与系统</p>
           <h2 id="compatibility-title">Perky 面向 MacBook；Windows RedmiBook 不支持。</h2>
-          <p>Perky 是原生 macOS 应用。Apple 支持的外接显示器合盖桌面模式与无外接屏幕实验性 IOKit 覆盖有不同要求，请按设备和操作系统判断。</p>
+          <p>Perky 是原生 macOS 应用。合盖运行通过系统级防睡眠实现，需要管理员安装本机恢复 helper；请按设备和操作系统判断。</p>
         </div>
         <div class="compat-table" role="table" aria-label="Perky 设备兼容性">
           <div class="compat-row compat-head" role="row">
             <span role="columnheader">设备或系统</span><span role="columnheader">当前支持情况</span>
           </div>
           <div class="compat-row" role="row">
+            <span role="cell">合盖运行（系统级防睡眠）</span><span role="cell"><b class="status-dot status-green"></b>启动时验证生效；停止、到期或安全停止时恢复</span>
+          </div>
+          <div class="compat-row" role="row">
             <span role="cell">Apple 外接显示器合盖桌面模式</span><span role="cell"><b class="status-dot status-green"></b>Apple 支持；按机型连接显示器与输入配件</span>
           </div>
           <div class="compat-row" role="row">
-            <span role="cell">无外接显示器 IOKit 合盖覆盖</span><span role="cell"><b class="status-dot status-amber"></b>实验性；SDK selector 不代表 Apple 承诺支持</span>
-          </div>
-          <div class="compat-row" role="row">
-            <span role="cell">pmset 全局回退</span><span role="cell"><b class="status-dot status-amber"></b>修改系统级状态，会话结束后必须恢复</span>
+            <span role="cell">开盖基础保持唤醒</span><span role="cell"><b class="status-dot status-green"></b>通过电源断言防止空闲睡眠，不阻止合盖睡眠</span>
           </div>
           <div class="compat-row" role="row">
             <span role="cell">RedmiBook、Redmi / Xiaomi 笔记本</span><span role="cell"><b class="status-dot status-gray"></b>Windows 版本不支持</span>
@@ -255,7 +255,7 @@
             <span role="cell">华为 MateBook、ThinkPad 等 Windows PC</span><span role="cell"><b class="status-dot status-gray"></b>当前版本不支持</span>
           </div>
         </div>
-        <p class="compat-note"><strong>关于无外接屏幕方案：</strong>GitHub 安装包会请求管理员认证，以安装本机恢复 helper；安装包未经过 Apple 公证，首次打开可能需要在“隐私与安全性”中手动允许。IOKit selector 是实验性调用，SDK 中存在 selector 不等于 Apple 为第三方 App 承诺兼容。若使用 pmset 回退，设置为全局生效；Perky 会记录原值并在会话结束时恢复。Mac 机型和 macOS 变化都可能影响结果，Perky 不保证所有机型均可合盖运行。</p>
+        <p class="compat-note"><strong>关于合盖运行：</strong>GitHub 安装包会请求管理员认证，以安装本机恢复 helper；安装包未经过 Apple 公证，首次打开可能需要在“隐私与安全性”中手动允许。合盖运行依赖全局 <code>SleepDisabled</code>，会影响整台 Mac；Perky 会在启动时验证并记录原值，在会话结束时恢复。Mac 机型和 macOS 变化仍可能影响行为，请按应用提示处理恢复异常。</p>
       </section>
 
       <section class="faq-section" id="faq" aria-labelledby="faq-title">
@@ -267,14 +267,14 @@
           <div class="faq-list">
             <details>
               <summary>MacBook 合盖连接外接显示器时可以继续使用吗？</summary>
-              <p>Apple 支持在 MacBook 接入外接显示器及所需键盘、鼠标或触控板后合盖使用。具体供电、配件和机型要求请看 <a href="https://support.apple.com/zh-cn/102282">Apple 支持文档</a>。Perky 对合盖会话另行检查外接显示器与供电条件。</p>
+              <p>Apple 支持在 MacBook 接入外接显示器及所需键盘、鼠标或触控板后合盖使用。具体供电、配件和机型要求请看 <a href="https://support.apple.com/zh-cn/102282">Apple 支持文档</a>。Perky 的合盖会话会另行检查电量与安全停止条件。</p>
             </details>
             <details>
               <summary>没有外接显示器，Perky 也能在 MacBook 合盖后继续运行吗？</summary>
-              <p>Perky 提供实验性的 IOKit 合盖覆盖。macOS SDK 中存在相关 selector，但 Apple 没有承诺第三方 App 可依赖此接口；兼容性会随机型与 macOS 版本变化，不能保证所有 MacBook 均可用。GitHub 安装包会请求管理员认证并安装本机恢复 helper；该安装包没有 Apple 公证，首次启动可能需要手动通过 Gatekeeper。</p>
+              <p>可以。Perky 通过管理员安装的本机恢复 helper 临时启用系统级防睡眠（<code>SleepDisabled</code>），并用 <code>pmset -g</code> 验证生效；停止、到期或触发安全条件时恢复启用前的值。GitHub 安装包会请求管理员认证并安装 helper；该安装包没有 Apple 公证，首次启动可能需要手动通过 Gatekeeper。</p>
             </details>
             <details>
-              <summary>pmset 回退会改动整台 Mac 吗？</summary>
+              <summary>pmset disablesleep 会改动整台 Mac 吗？</summary>
               <p>会。<code>pmset -a disablesleep</code> 会设置全局系统级防睡眠状态。Perky 记录启用前的值，并在会话结束时恢复；若无法确认恢复或检测到系统设置被其他程序改动，会保留恢复记录并提示处理。</p>
             </details>
             <details>
@@ -287,7 +287,7 @@
             </details>
             <details>
               <summary>可以在哪里获取 Perky？</summary>
-              <p>GitHub 发布版本后，可从 <a href="https://github.com/Laplace-bit/perky/releases">GitHub Releases</a> 获取本机管理员安装包。安装时需管理员认证；安装包未经过 Apple 公证，macOS 可能要求你在“系统设置 &gt; 隐私与安全性”中手动允许打开。也可以查看源码，在自己的 Mac 上构建。</p>
+              <p>从 <a href="https://github.com/Laplace-bit/perky/releases/latest">GitHub Releases</a> 下载最新的 Apple Silicon（arm64）安装包。先登录桌面，双击 <code>.pkg</code> 并输入管理员密码；安装器会写入 Perky、root 权限的本机恢复 helper 和 LaunchDaemon。若 Gatekeeper 拦截，请到“系统设置 &gt; 隐私与安全性”选择“仍要打开”，不要关闭 Gatekeeper。打开 Perky 后点击菜单栏图标，选择时长并开启“合盖运行”；等面板确认系统级防睡眠已生效后再合盖。停止、到期或触发安全条件时会恢复系统设置。安装包未经过 Apple 公证，Intel Mac 需自行从源码构建。</p>
             </details>
           </div>
         </div>
@@ -305,11 +305,11 @@
       <section class="closing-cta shell" aria-labelledby="closing-title">
         <div>
           <p class="eyebrow">开始之前</p>
-          <h2 id="closing-title">查看源码，按你的 Mac 构建。</h2>
-          <p>了解当前实现、签名要求和构建步骤。</p>
+          <h2 id="closing-title">下载 Perky，验证你的合盖场景。</h2>
+          <p>Apple Silicon 本机管理员安装包，未公证；源码与构建步骤在 GitHub。</p>
         </div>
-        <a class="button button-light" href="https://github.com/Laplace-bit/perky">
-          前往 GitHub 仓库 <span aria-hidden="true">↗</span>
+        <a class="button button-light" href="https://github.com/Laplace-bit/perky/releases/latest">
+          下载最新版本 <span aria-hidden="true">↗</span>
         </a>
       </section>
     </main>

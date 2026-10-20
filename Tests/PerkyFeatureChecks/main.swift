@@ -27,6 +27,7 @@ private enum PerkyFeatureChecks {
             ("login item authorization routing", checkAuthorizationSettingsPolicy),
             ("brightness target bounds", checkBrightnessPolicy),
             ("read-only hardware capability probes", checkHardwareCapabilities),
+            ("system sleep-disabled probe consistency", checkSleepDisabledProbe),
             ("macOS power assertion lifecycle", checkPowerAssertionLifecycle)
         ]
         if CommandLine.arguments.contains("--system-smoke") {
@@ -64,7 +65,7 @@ private enum PerkyFeatureChecks {
         try expect(ready.canUseAppleClamshellMode, "sensor, external display and AC power should be required")
         try expectEqual(
             ready.readinessMessage,
-            "已接电源并检测到外接显示器；还需连接外接键盘和鼠标或触控板。",
+            "已接电源并检测到外接显示器；合盖后会话会继续运行。",
             "ready-state message"
         )
 
@@ -76,7 +77,7 @@ private enum PerkyFeatureChecks {
         try expect(!noDisplay.canUseAppleClamshellMode, "clamshell mode must reject a missing external display")
         try expectEqual(
             noDisplay.readinessMessage,
-            "未检测到外接显示器 · 将尝试软件合盖策略；此路径需按机型验证。",
+            "未检测到外接显示器 · 将启用系统级防睡眠，合盖后会话继续运行。",
             "missing display message"
         )
 
@@ -84,7 +85,7 @@ private enum PerkyFeatureChecks {
         try expect(!onBattery.canUseAppleClamshellMode, "clamshell mode must reject AC disconnection")
         try expectEqual(
             onBattery.readinessMessage,
-            "电池供电 · 低电量或热压力过高时自动停止；Apple 原生合盖桌面模式需接电源。",
+            "电池供电 · 合盖运行会持续耗电；达到停止阈值、进入低电量模式或热压力过高时自动停止。",
             "battery message"
         )
     }
@@ -196,6 +197,42 @@ private enum PerkyFeatureChecks {
             try expect(!brightness.isAvailable, "brightness capability and read result must agree")
             print("INFO  brightness: \(brightness.availabilityMessage)")
         }
+    }
+
+    private static func checkSleepDisabledProbe() throws {
+        let snapshot = LidModeSnapshot.current()
+        guard let snapshotValue = snapshot.systemSleepDisabled else {
+            throw CheckFailure(description: "SleepDisabled is not readable from IOPMrootDomain; lid-mode verification would be unreliable")
+        }
+        guard let pmsetValue = pmsetSleepDisabled() else {
+            throw CheckFailure(description: "pmset did not report SleepDisabled")
+        }
+        try expectEqual(snapshotValue, pmsetValue, "IORegistry SleepDisabled must match pmset")
+        print("INFO  sleep disabled: \(snapshotValue ? "enabled" : "disabled")")
+    }
+
+    private static func pmsetSleepDisabled() -> Bool? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/pmset")
+        process.arguments = ["-g"]
+        let outputPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { return nil }
+        let output = String(data: outputPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        for line in output.split(whereSeparator: \.isNewline) {
+            let parts = line.split(whereSeparator: \.isWhitespace)
+            guard parts.first == "SleepDisabled", parts.count > 1 else { continue }
+            if parts[1] == "1" { return true }
+            if parts[1] == "0" { return false }
+        }
+        return nil
     }
 
     private static func checkPowerAssertionLifecycle() throws {
